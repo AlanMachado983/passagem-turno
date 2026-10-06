@@ -1,120 +1,166 @@
-import streamlit as st
-import sqlite3
+import os, sqlite3
+from datetime import date, datetime, timedelta
 import pandas as pd
-from datetime import datetime, date, timedelta
-from pathlib import Path
+import streamlit as st
 
-DB = Path(__file__).with_name('passagem_turno.db')
-st.set_page_config(page_title='Passagem de Turno | Logística', page_icon='📦', layout='wide')
+st.set_page_config(page_title='Passagem de Turno | Logística', page_icon='🚚', layout='wide')
+DB='passagem_turno.db'
 
-CSS='''<style>
-.block-container{padding-top:1.4rem;max-width:1450px}.stMetric{background:#f7f8fa;border:1px solid #e5e7eb;padding:12px;border-radius:12px}
-div[data-testid="stForm"]{border:1px solid #e5e7eb;padding:18px;border-radius:14px}.small{color:#667085;font-size:.9rem}
+def conn():
+    c=sqlite3.connect(DB, check_same_thread=False, timeout=30)
+    c.execute('PRAGMA journal_mode=WAL;')
+    return c
+
+def init_db():
+    with conn() as c:
+        c.execute('''CREATE TABLE IF NOT EXISTS passagens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT, area TEXT, lider TEXT,
+        headcount INTEGER, ausencias INTEGER, presentes INTEGER, presenca_pct REAL,
+        toneladas REAL DEFAULT 0, cargas INTEGER DEFAULT 0, uz_paletes INTEGER DEFAULT 0,
+        pend_cargas INTEGER DEFAULT 0, falta_produtos INTEGER DEFAULT 0, chamados INTEGER DEFAULT 0,
+        prioridade_faturamento INTEGER DEFAULT 0, prioridade_entrega INTEGER DEFAULT 0,
+        ofensor TEXT, ponto_atencao TEXT, ocorrencias TEXT,
+        maquina_problema INTEGER DEFAULT 0, maquina_detalhe TEXT,
+        anomalia INTEGER DEFAULT 0, anomalia_detalhe TEXT, informacoes_adicionais TEXT,
+        UNIQUE(data, turno, area))''')
+init_db()
+
+CSS='''
+<style>
+:root{--adimax:#f2b600;--ink:#202124;--wine:#7c1730;--soft:#f5f6f8;}
+[data-testid="stAppViewContainer"]{background:#f5f6f8;}
+.block-container{padding-top:1.2rem;max-width:1450px;}
+.hero{position:relative;border-radius:18px;overflow:hidden;height:230px;margin-bottom:18px;background:#222;box-shadow:0 5px 18px #00000018}
+.hero img{width:100%;height:100%;object-fit:cover;filter:brightness(.62)}
+.hero-text{position:absolute;left:34px;bottom:26px;color:white}.hero-text h1{font-size:2.25rem;margin:0;font-weight:800}.hero-text p{margin:.2rem 0 0;font-size:1.05rem}
+.brand{display:inline-block;background:var(--adimax);color:#111;padding:8px 14px;border-radius:8px;font-weight:900;letter-spacing:.6px;margin-bottom:10px}
+.card{background:white;border-radius:16px;padding:20px 22px;box-shadow:0 2px 12px #0000000c;border:1px solid #e9eaed;margin-bottom:14px}
+.section-title{font-weight:800;font-size:1.12rem;color:#2d3035;margin-bottom:10px}.accent{border-left:6px solid var(--adimax)}
+.metricbox{background:white;border-radius:14px;padding:16px;border:1px solid #eceef0;text-align:center}.metricbox b{font-size:1.7rem;color:#222}.metricbox span{display:block;color:#6b7078;font-size:.85rem}
+.warn{background:#fff4f6;border:1px solid #f3ccd5;border-left:5px solid var(--wine);border-radius:12px;padding:12px 14px}
+[data-testid="stSidebar"]{background:#fff;} [data-testid="stSidebar"] img{border-radius:12px}
+.stButton>button[kind="primary"]{background:var(--adimax);color:#111;border:0;font-weight:800}
 </style>'''
 st.markdown(CSS, unsafe_allow_html=True)
 
-@st.cache_resource
-def get_conn():
-    c=sqlite3.connect(DB, check_same_thread=False, timeout=30)
-    c.execute('PRAGMA journal_mode=WAL')
-    c.execute('PRAGMA busy_timeout=30000')
-    c.execute('''CREATE TABLE IF NOT EXISTS passagens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT NOT NULL, data TEXT NOT NULL, turno TEXT NOT NULL,
-      area TEXT NOT NULL, lider TEXT, headcount INTEGER NOT NULL, ausencias INTEGER NOT NULL, presentes INTEGER NOT NULL,
-      presenca REAL NOT NULL, absenteismo REAL NOT NULL, unidade TEXT NOT NULL, planejado REAL NOT NULL, realizado REAL NOT NULL,
-      atingimento REAL NOT NULL, gap REAL NOT NULL, ofensor TEXT, ponto_atencao TEXT, pendencia TEXT, prioridade TEXT,
-      UNIQUE(data,turno,area)
-    )''')
-    c.commit(); return c
-conn=get_conn()
+# sidebar
+with st.sidebar:
+    st.markdown('## ADIMAX')
+    page=st.radio('Navegação',['Nova passagem','Visão atual','Semana','Histórico'], label_visibility='collapsed')
+    if os.path.exists('assets/caminhoes.png'):
+        st.image('assets/caminhoes.png', caption='Operação logística', use_container_width=True)
 
-def carregar(): return pd.read_sql_query('SELECT * FROM passagens ORDER BY data DESC, id DESC',conn)
-def pct(v): return f'{v:.1f}%'.replace('.',',')
-def n(v): return f'{v:,.1f}'.replace(',','X').replace('.',',').replace('X','.')
-def farol(a): return '🟢 Dentro do esperado' if a>=100 else ('🟡 Atenção' if a>=90 else '🔴 Crítico')
-def unidade(area): return 'ton' if area=='ESTOQUE' else 'cargas'
+if os.path.exists('assets/fabrica.png'):
+    import base64
+    b64=base64.b64encode(open('assets/fabrica.png','rb').read()).decode()
+    st.markdown(f'''<div class="hero"><img src="data:image/png;base64,{b64}"><div class="hero-text"><div class="brand">ADIMAX</div><h1>Passagem de Turno</h1><p>Logística • CDA 01 • CDA 02 • Estoque</p></div></div>''',unsafe_allow_html=True)
+else:
+    st.title('Passagem de Turno — Logística')
 
-st.title('📦 Passagem de Turno — Logística')
-st.caption('CDA 01 • CDA 02 • Estoque | lançamento rápido, visão atual, semana e histórico')
-menu=st.sidebar.radio('Navegação',['📝 Nova passagem','📍 Visão atual','📊 Semana','🗂️ Histórico'])
+def pct(h,a):
+    p=max(h-a,0); return p, (p/h*100 if h else 0)
 
-if menu=='📝 Nova passagem':
-    st.subheader('Nova passagem')
-    st.caption('Preencha somente o essencial. Os indicadores são calculados automaticamente.')
-    with st.form('passagem',clear_on_submit=True):
-        a,b,c,d=st.columns(4)
-        data_ref=a.date_input('Data',date.today()); turno=b.selectbox('Turno',['T1','T2','T3']); area=c.selectbox('Área',['CDA 01','CDA 02','ESTOQUE']); lider=d.text_input('Líder / responsável')
-        st.markdown('#### 👥 Efetivo')
-        a,b=st.columns(2); hc=a.number_input('Headcount do turno',0,500,step=1); aus=b.number_input('Ausências',0,500,step=1)
-        st.markdown('#### 🎯 Planejado × realizado')
-        un=unidade(area); a,b=st.columns(2); plan=a.number_input(f'Planejado ({un})',0.0,1000000.0,step=1.0); real=b.number_input(f'Realizado ({un})',0.0,1000000.0,step=1.0)
-        if area=='ESTOQUE': st.caption('Estoque: indicador principal = peso puxado da produção em toneladas.')
-        st.markdown('#### ⚠️ Gestão do turno')
-        a,b=st.columns(2)
-        ofensor=a.selectbox('Principal ofensor',['Sem ofensor','Absenteísmo','Equipamento','Sistema / WMS','Produção','Falta de estoque','Atraso de veículo','Processo / operação','Outro'])
-        ponto=b.text_input('Ponto de atenção',placeholder='Somente se houver algo relevante')
-        pend=st.text_area('Pendência para o próximo turno',height=75,placeholder='O que ficou e precisa ser conhecido pelo próximo turno?')
-        prio=st.text_area('Prioridade para o próximo turno',height=75,placeholder='Qual deve ser a primeira ação do próximo turno?')
-        salvar=st.form_submit_button('💾 FINALIZAR PASSAGEM',type='primary',use_container_width=True)
-    if salvar:
-        if hc<=0: st.error('Informe o headcount.')
-        elif aus>hc: st.error('Ausências não podem superar o headcount.')
-        elif plan<=0: st.error('Informe o planejado.')
+def save(rec):
+    cols=','.join(rec.keys()); marks=','.join(['?']*len(rec))
+    with conn() as c:
+        c.execute(f'INSERT INTO passagens ({cols}) VALUES ({marks})',tuple(rec.values()))
+
+def load(where='',params=()):
+    q='SELECT * FROM passagens '+where+' ORDER BY data DESC, id DESC'
+    with conn() as c: return pd.read_sql_query(q,c,params=params)
+
+if page=='Nova passagem':
+    st.markdown('### Nova passagem de turno')
+    st.caption('Preencha somente as informações essenciais do turno que está finalizando.')
+    a,b,c,d=st.columns([1,1,1,1.5])
+    dt=a.date_input('Data',date.today()); turno=b.selectbox('Turno',['T1','T2','T3']); area=c.selectbox('Área',['CDA 01','CDA 02','ESTOQUE']); lider=d.text_input('Líder / responsável')
+    st.markdown('<div class="card accent"><div class="section-title">Equipe do turno</div></div>',unsafe_allow_html=True)
+    e1,e2=st.columns(2); hc=e1.number_input('Headcount',0,500,0); aus=e2.number_input('Ausências',0,500,0); pres,pp=pct(hc,aus)
+    m1,m2,m3=st.columns(3); m1.metric('Presentes',pres); m2.metric('Equipe presente',f'{pp:.1f}%'); m3.metric('Absenteísmo',f'{100-pp:.1f}%' if hc else '0,0%')
+
+    toneladas=cargas=uz=pend=faltas=chamados=pfat=pent=0
+    ofensor=ponto=ocorr=''; maq=False; maqdet=''; anom=False; anomdet=''; adicionais=''
+    st.markdown(f'### Resultado do turno — {area}')
+    if area=='CDA 01':
+        r1,r2=st.columns(2); toneladas=r1.number_input('Toneladas realizadas',0.0,10000.0,0.0,step=0.1); cargas=r2.number_input('Cargas realizadas',0,1000,0)
+        st.markdown('#### Situação da operação')
+        q1,q2,q3,q4,q5=st.columns(5)
+        pend=q1.number_input('Cargas pendentes',0,1000,0); faltas=q2.number_input('Faltas de produto',0,1000,0); chamados=q3.number_input('Chamados abertos',0,1000,0); pfat=q4.number_input('Prioridade faturamento',0,1000,0); pent=q5.number_input('Prioridade entrega',0,1000,0)
+        ocorr=st.text_area('Detalhes das cargas / chamados / prioridades (opcional)')
+        ponto=st.text_area('Ponto de atenção / observações')
+    elif area=='CDA 02':
+        r1,r2=st.columns(2); cargas=r1.number_input('Cargas separadas',0,1000,0); uz=r2.number_input('Paletes / UZs separados',0,10000,0)
+        ofensor=st.text_area('Principal ofensor (se houver)')
+        ponto=st.text_area('Ponto de atenção')
+        ocorr=st.text_area('Informações / ocorrências do turno')
+    else:
+        r1,r2=st.columns(2); toneladas=r1.number_input('Toneladas puxadas da produção',0.0,10000.0,0.0,step=0.1); uz=r2.number_input('Paletes puxados',0,10000,0)
+        ofensor=st.text_area('Principal ofensor (se houver)')
+        x1,x2=st.columns(2); maq=x1.checkbox('Máquina / equipamento com problema'); anom=x2.checkbox('Anomalia que influencia o próximo turno')
+        if maq: maqdet=st.text_area('Qual equipamento e qual problema?')
+        if anom: anomdet=st.text_area('Descreva a anomalia e o impacto')
+        ponto=st.text_area('Ponto de atenção')
+        adicionais=st.text_area('Informações adicionais')
+    if st.button('Salvar passagem',type='primary',use_container_width=True):
+        if not lider.strip(): st.error('Informe o líder / responsável.')
+        elif aus>hc: st.error('Ausências não pode ser maior que o headcount.')
         else:
-            pres=int(hc-aus); pp=pres/hc*100; ab=aus/hc*100; at=real/plan*100; gap=real-plan
-            try:
-                conn.execute('''INSERT INTO passagens(criado_em,data,turno,area,lider,headcount,ausencias,presentes,presenca,absenteismo,unidade,planejado,realizado,atingimento,gap,ofensor,ponto_atencao,pendencia,prioridade) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(datetime.now().isoformat(timespec='seconds'),str(data_ref),turno,area,lider,int(hc),int(aus),pres,pp,ab,un,plan,real,at,gap,ofensor,ponto,pend,prio)); conn.commit(); st.success(f'{area} / {turno} salvo. Presença {pct(pp)} • Atingimento {pct(at)} • {farol(at)}')
-            except sqlite3.IntegrityError: st.error('Já existe uma passagem dessa Área/Turno/Data. Use o histórico para conferir antes de lançar novamente.')
+            rec=dict(criado_em=datetime.now().isoformat(timespec='seconds'),data=str(dt),turno=turno,area=area,lider=lider.strip(),headcount=hc,ausencias=aus,presentes=pres,presenca_pct=pp,toneladas=toneladas,cargas=cargas,uz_paletes=uz,pend_cargas=pend,falta_produtos=faltas,chamados=chamados,prioridade_faturamento=pfat,prioridade_entrega=pent,ofensor=ofensor,ponto_atencao=ponto,ocorrencias=ocorr,maquina_problema=int(maq),maquina_detalhe=maqdet,anomalia=int(anom),anomalia_detalhe=anomdet,informacoes_adicionais=adicionais)
+            try: save(rec); st.success('Passagem salva com sucesso.')
+            except sqlite3.IntegrityError: st.error('Já existe uma passagem para esta Data + Turno + Área.')
 
-elif menu=='📍 Visão atual':
-    st.subheader('Visão atual da operação')
-    df=carregar()
-    if df.empty: st.info('Sem registros ainda.')
+elif page=='Visão atual':
+    st.markdown('### Visão atual')
+    df=load()
+    if df.empty: st.info('Nenhuma passagem registrada ainda.')
     else:
         cols=st.columns(3)
-        for col,ar in zip(cols,['CDA 01','CDA 02','ESTOQUE']):
-            with col:
-                x=df[df.area==ar].head(1)
-                st.markdown(f'### {ar}')
-                if x.empty: st.warning('Sem passagem registrada'); continue
-                r=x.iloc[0]; st.caption(f"{r.data} • {r.turno} • {r.lider or 'Responsável não informado'}")
-                st.metric('Equipe trabalhando',pct(r.presenca),f"{int(r.presentes)}/{int(r.headcount)} • {int(r.ausencias)} ausência(s)")
-                st.metric('Atingimento',pct(r.atingimento),farol(r.atingimento)); st.metric('Realizado',f"{n(r.realizado)} {r.unidade}",f"Plano {n(r.planejado)} • GAP {n(r.gap)}")
-                st.write('**Ofensor:**',r.ofensor); st.write('**Ponto de atenção:**',r.ponto_atencao or '—'); st.write('**Pendência:**',r.pendencia or '—'); st.write('**Prioridade:**',r.prioridade or '—')
+        for i,ar in enumerate(['CDA 01','CDA 02','ESTOQUE']):
+            x=df[df.area==ar].head(1)
+            with cols[i]:
+                st.markdown(f'#### {ar}')
+                if x.empty: st.caption('Sem registro')
+                else:
+                    r=x.iloc[0]; st.caption(f"{r['data']} • {r['turno']} • {r['lider']}")
+                    st.metric('Equipe presente',f"{r['presenca_pct']:.1f}%",f"{r['ausencias']} ausência(s)")
+                    if ar=='CDA 01': st.metric('Toneladas',f"{r['toneladas']:.1f} t"); st.metric('Cargas',int(r['cargas'])); st.write(f"Pendentes: **{int(r['pend_cargas'])}** | Faltas produto: **{int(r['falta_produtos'])}**")
+                    elif ar=='CDA 02': st.metric('Cargas separadas',int(r['cargas'])); st.metric('UZs / paletes',int(r['uz_paletes'])); st.write('**Ofensor:**',r['ofensor'] or '—')
+                    else: st.metric('Toneladas puxadas',f"{r['toneladas']:.1f} t"); st.metric('Paletes puxados',int(r['uz_paletes'])); st.write('**Ofensor:**',r['ofensor'] or '—')
+                    if r['ponto_atencao']: st.warning(r['ponto_atencao'])
 
-elif menu=='📊 Semana':
-    st.subheader('Resumo da semana')
-    df=carregar()
-    if df.empty: st.info('Sem dados ainda.')
+elif page=='Semana':
+    st.markdown('### Situação da semana')
+    today=date.today(); ini=today-timedelta(days=today.weekday()); fim=ini+timedelta(days=6)
+    f1,f2,f3=st.columns(3); d1=f1.date_input('De',ini); d2=f2.date_input('Até',fim); af=f3.selectbox('Área',['Todas','CDA 01','CDA 02','ESTOQUE'])
+    df=load('WHERE data BETWEEN ? AND ?',(str(d1),str(d2)))
+    if af!='Todas': df=df[df.area==af]
+    if df.empty: st.info('Sem registros no período.')
     else:
-        df['data_dt']=pd.to_datetime(df.data)
-        fim=pd.Timestamp(st.date_input('Semana até',date.today())); ini=fim-pd.Timedelta(days=6); sem=df[(df.data_dt>=ini)&(df.data_dt<=fim)].copy()
-        st.caption(f'Período: {ini.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}')
-        if sem.empty: st.warning('Sem registros no período.')
-        else:
-            cards=st.columns(3)
-            for col,ar in zip(cards,['CDA 01','CDA 02','ESTOQUE']):
-                s=sem[sem.area==ar]
-                with col:
-                    st.markdown(f'### {ar}')
-                    if s.empty: st.warning('Sem dados'); continue
-                    st.metric('Atingimento médio',pct(s.atingimento.mean())); st.metric('Presença média',pct(s.presenca.mean())); st.metric('Ausências acumuladas',int(s.ausencias.sum()),f'{len(s)} passagem(ns)')
-            st.markdown('### Evolução do atingimento (%)')
-            evo=sem.pivot_table(index='data_dt',columns='area',values='atingimento',aggfunc='mean').sort_index(); st.line_chart(evo)
-            st.markdown('### Presença média (%)'); st.bar_chart(sem.groupby('area').presenca.mean())
-            st.markdown('### Ofensores da semana')
-            of=sem[sem.ofensor!='Sem ofensor'].groupby(['area','ofensor']).size().reset_index(name='Ocorrências').sort_values('Ocorrências',ascending=False)
-            if of.empty: st.success('Nenhum ofensor registrado.');
-            else: st.dataframe(of,use_container_width=True,hide_index=True)
-            st.markdown('### Turnos abaixo do planejado')
-            baixo=sem[sem.atingimento<100][['data','turno','area','atingimento','gap','ofensor','pendencia']].sort_values(['data','area'],ascending=[False,True]); st.dataframe(baixo,use_container_width=True,hide_index=True)
+        s1,s2,s3,s4=st.columns(4); s1.metric('Passagens',len(df)); s2.metric('Presença média',f"{df.presenca_pct.mean():.1f}%"); s3.metric('Ausências',int(df.ausencias.sum())); s4.metric('Turnos com ofensor',int((df.ofensor.fillna('').str.strip()!='').sum()))
+        for ar in ['CDA 01','CDA 02','ESTOQUE']:
+            x=df[df.area==ar].copy()
+            if x.empty: continue
+            st.markdown(f'#### {ar}')
+            k1,k2,k3=st.columns(3)
+            if ar=='CDA 01': k1.metric('Toneladas',f"{x.toneladas.sum():.1f} t"); k2.metric('Cargas',int(x.cargas.sum())); k3.metric('Presença média',f"{x.presenca_pct.mean():.1f}%")
+            elif ar=='CDA 02': k1.metric('Cargas',int(x.cargas.sum())); k2.metric('UZs / paletes',int(x.uz_paletes.sum())); k3.metric('Presença média',f"{x.presenca_pct.mean():.1f}%")
+            else: k1.metric('Toneladas puxadas',f"{x.toneladas.sum():.1f} t"); k2.metric('Paletes puxados',int(x.uz_paletes.sum())); k3.metric('Presença média',f"{x.presenca_pct.mean():.1f}%")
+            x['dia_turno']=x['data']+' '+x['turno']
+            val='toneladas' if ar!='CDA 02' else 'cargas'
+            st.bar_chart(x.set_index('dia_turno')[[val]])
+        ofs=df[df.ofensor.fillna('').str.strip()!=''].groupby('ofensor').size().sort_values(ascending=False)
+        if len(ofs): st.markdown('#### Ofensores registrados'); st.bar_chart(ofs)
 
 else:
-    st.subheader('Histórico')
-    df=carregar()
-    if df.empty: st.info('Sem registros ainda.')
+    st.markdown('### Histórico')
+    df=load()
+    if df.empty: st.info('Nenhuma passagem registrada.')
     else:
-        a,b=st.columns(2); areas=a.multiselect('Área',['CDA 01','CDA 02','ESTOQUE'],default=['CDA 01','CDA 02','ESTOQUE']); turnos=b.multiselect('Turno',['T1','T2','T3'],default=['T1','T2','T3'])
-        vis=df[df.area.isin(areas)&df.turno.isin(turnos)].copy(); cols=['data','turno','area','lider','headcount','ausencias','presentes','presenca','absenteismo','planejado','realizado','atingimento','gap','unidade','ofensor','ponto_atencao','pendencia','prioridade']
-        st.dataframe(vis[cols],use_container_width=True,hide_index=True)
-        st.download_button('⬇️ Exportar histórico',vis[cols].to_csv(index=False).encode('utf-8-sig'),'historico_passagem_turno.csv','text/csv')
+        f1,f2=st.columns(2); af=f1.selectbox('Filtrar área',['Todas','CDA 01','CDA 02','ESTOQUE']); tf=f2.selectbox('Filtrar turno',['Todos','T1','T2','T3'])
+        if af!='Todas': df=df[df.area==af]
+        if tf!='Todos': df=df[df.turno==tf]
+        show=['data','turno','area','lider','headcount','ausencias','presenca_pct','toneladas','cargas','uz_paletes','pend_cargas','falta_produtos','chamados','ofensor','ponto_atencao']
+        st.dataframe(df[show],use_container_width=True,hide_index=True)
+        st.download_button('Baixar histórico em CSV',df.to_csv(index=False).encode('utf-8-sig'),'historico_passagem.csv','text/csv')
+
+st.caption('V3 • Protótipo operacional. Para uso definitivo no Streamlit Cloud, conectar a um banco persistente antes de registrar dados reais.')
