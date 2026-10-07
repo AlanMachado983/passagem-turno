@@ -8,6 +8,9 @@ st.set_page_config(page_title='Passagem de Turno | ADIMAX', page_icon='📦', la
 
 DB='passagem_turno.db'
 
+def nome_turno(turno):
+    return {'T1':'1º Turno','T2':'2º Turno','T3':'3º Turno'}.get(str(turno),str(turno))
+
 def em_toneladas(valor):
     """Converte peso operacional em kg para toneladas; mantém valores já lançados em t."""
     try:
@@ -259,9 +262,9 @@ elif pagina=='🎯 Planejado do Dia':
     for col,t in zip([a2,a3,a4],['T1','T2','T3']):
         p,au,hc=abs_turnos[t]
         if p is None:
-            col.metric(t,'Aguardando passagem')
+            col.metric(nome_turno(t),'Aguardando passagem')
         else:
-            col.metric(t,f'{p:.1f}%',f'{au:g} ausências | HC {hc:g}')
+            col.metric(nome_turno(t),f'{p:.1f}%',f'{au:g} ausências | HC {hc:g}')
     st.caption(f'Total consolidado: {aus_geral:g} ausências | Headcount {hc_geral:g}' if hc_geral else 'Ainda não há efetivo lançado para o dia.')
     st.markdown('---')
 
@@ -286,7 +289,7 @@ elif pagina=='🎯 Planejado do Dia':
     for col,t in zip(cols,['T1','T2','T3']):
         v=0.0
         if not sep.empty and not sep[sep.turno==t].empty: v=em_toneladas(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
-        col.metric(t,f'{v:.1f} t')
+        col.metric(nome_turno(t),f'{v:.1f} t')
     st.markdown('---'); st.markdown('### 🚛 Carregamento')
     st.caption('Realizado do dia — sem planejamento por enquanto.')
     c1,c2=st.columns(2); c1.metric('Cargas carregadas no dia',f'{cargas_car:g}'); c2.metric('Toneladas carregadas no dia',f'{ton_car:.1f} t')
@@ -296,7 +299,7 @@ elif pagina=='🎯 Planejado do Dia':
         n=0.0; peso=0.0
         if not car.empty and not car[car.turno==t].empty:
             r=car[car.turno==t].iloc[-1]; n=float(r.veiculos_carregados); peso=em_toneladas(r.toneladas_realizadas)
-        col.metric(t,f'{n:g} cargas',f'{peso:.1f} t')
+        col.metric(nome_turno(t),f'{n:g} cargas',f'{peso:.1f} t')
     st.caption('Após a passagem do T3, este painel entrega o fechamento do dia para o GDD.')
 
 elif pagina=='📝 Nova Passagem':
@@ -304,7 +307,8 @@ elif pagina=='📝 Nova Passagem':
     a,b,c,dcol=st.columns(4)
     resp=a.text_input('Responsável pela passagem',placeholder='Nome do líder')
     area=b.selectbox('Área',['CDA 01','CDA 02','Estoque'])
-    turno=c.selectbox('Turno',['T1','T2','T3'])
+    turno_nome=c.selectbox('Turno',['1º Turno','2º Turno','3º Turno'])
+    turno={'1º Turno':'T1','2º Turno':'T2','3º Turno':'T3'}[turno_nome]
     data_reg=dcol.date_input('Data',date.today())
     operacao='CDA 02' if area=='CDA 02' else ('Estoque' if area=='Estoque' else st.selectbox('Operação',['CDA 01 - Separação','CDA 01 - Carregamento']))
 
@@ -520,6 +524,7 @@ elif pagina=='🕘 Histórico':
         df_exibir=df.copy()
         df_exibir['toneladas_realizadas']=df_exibir['toneladas_realizadas'].apply(em_toneladas)
         df_exibir['cargas_realizadas']=df_exibir.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
+        if 'turno' in df_exibir.columns: df_exibir['turno']=df_exibir['turno'].apply(nome_turno)
         st.dataframe(df_exibir,use_container_width=True,hide_index=True)
         st.download_button('⬇️ Exportar CSV',df_exibir.to_csv(index=False).encode('utf-8-sig'),'historico_passagem.csv','text/csv')
         with st.expander('🗑️ Excluir registro'):
