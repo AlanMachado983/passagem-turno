@@ -183,14 +183,15 @@ if pagina=='📋 Planejamento':
     st.caption('Por enquanto, o planejamento diário é somente de toneladas de Separação.')
     c1,c2=st.columns(2)
     d=c1.date_input('Data',date.today())
-    valor=c2.number_input('Toneladas planejadas de Separação no dia',min_value=0.0,step=1.0,format='%.3f')
+    valor=c2.number_input('Planejado de Separação (toneladas)',min_value=0.0,step=1.0,format='%.1f',help='Digite em toneladas. Exemplo: 574 para 574 toneladas.')
     if st.button('💾 Salvar / atualizar planejamento diário',type='primary'):
+        valor_salvar=valor/1000.0 if valor>=10000 else valor
         c=conn(); cur=c.cursor(); agora=datetime.now().isoformat(timespec='seconds')
         existente=cur.execute("SELECT id FROM planejamento WHERE data=? AND turno='DIA' AND operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY id DESC LIMIT 1",(str(d),)).fetchone()
         if existente:
-            cur.execute('UPDATE planejamento SET planejado=?, atualizado_em=? WHERE id=?',(valor,agora,existente[0]))
+            cur.execute('UPDATE planejamento SET planejado=?, atualizado_em=? WHERE id=?',(valor_salvar,agora,existente[0]))
         else:
-            cur.execute("INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em) VALUES(?,'DIA','CDA 01 - Separação','Toneladas',?,?)",(str(d),valor,agora))
+            cur.execute("INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em) VALUES(?,'DIA','CDA 01 - Separação','Toneladas',?,?)",(str(d),valor_salvar,agora))
         c.commit(); c.close(); st.success('Planejamento diário salvo.'); st.rerun()
     df=query("SELECT id,data,planejado,atualizado_em FROM planejamento WHERE turno='DIA' AND operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY data DESC,id DESC LIMIT 50")
     if not df.empty:
@@ -203,6 +204,7 @@ elif pagina=='🎯 Planejado do Dia':
     st.caption('Logística • fechamento diário para acompanhamento e GDD')
     d=st.date_input('Data do painel',date.today(),key='data_painel_dia')
     plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
+    if plan_sep>=10000: plan_sep=plan_sep/1000.0
     dados=query("SELECT * FROM passagens WHERE data=? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d),))
     if not dados.empty:
         dados=dados.sort_values('id').groupby(['operacao','turno'],as_index=False).tail(1)
@@ -214,24 +216,24 @@ elif pagina=='🎯 Planejado do Dia':
     ating=pct(real_sep,plan_sep); gap=real_sep-plan_sep if plan_sep else 0.0
     st.markdown('### 📦 Separação')
     k1,k2,k3,k4=st.columns(4)
-    k1.metric('Planejado do dia',f'{plan_sep:.3f} t'); k2.metric('Realizado acumulado',f'{real_sep:.3f} t')
-    k3.metric('Atingimento',f'{ating:.1f}%' if plan_sep else '—'); k4.metric('Gap',f'{gap:+.3f} t' if plan_sep else '—')
+    k1.metric('Planejado do dia',f'{plan_sep:.1f} t'); k2.metric('Realizado acumulado',f'{real_sep:.1f} t')
+    k3.metric('Atingimento',f'{ating:.1f}%' if plan_sep else '—'); k4.metric('Gap',f'{gap:+.1f} t' if plan_sep else '—')
     st.markdown('#### Realizado por turno — Separação')
     cols=st.columns(3)
     for col,t in zip(cols,['T1','T2','T3']):
         v=0.0
         if not sep.empty and not sep[sep.turno==t].empty: v=float(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
-        col.metric(t,f'{v:.3f} t')
+        col.metric(t,f'{v:.1f} t')
     st.markdown('---'); st.markdown('### 🚛 Carregamento')
     st.caption('Realizado do dia — sem planejamento por enquanto.')
-    c1,c2=st.columns(2); c1.metric('Cargas carregadas no dia',f'{cargas_car:g}'); c2.metric('Toneladas carregadas no dia',f'{ton_car:.3f} t')
+    c1,c2=st.columns(2); c1.metric('Cargas carregadas no dia',f'{cargas_car:g}'); c2.metric('Toneladas carregadas no dia',f'{ton_car:.1f} t')
     st.markdown('#### Realizado por turno — Carregamento')
     cols=st.columns(3)
     for col,t in zip(cols,['T1','T2','T3']):
         n=0.0; peso=0.0
         if not car.empty and not car[car.turno==t].empty:
             r=car[car.turno==t].iloc[-1]; n=float(r.veiculos_carregados); peso=float(r.toneladas_realizadas)
-        col.metric(t,f'{n:g} cargas',f'{peso:.3f} t')
+        col.metric(t,f'{n:g} cargas',f'{peso:.1f} t')
     st.caption('Após a passagem do T3, este painel entrega o fechamento do dia para o GDD.')
 
 elif pagina=='📝 Nova Passagem':
@@ -259,8 +261,9 @@ elif pagina=='📝 Nova Passagem':
     st.subheader('📦 Resultado do turno')
     if operacao=='CDA 01 - Separação':
         pc=0.0; pt=scalar_plan(data_reg,'DIA',operacao,'Toneladas')
+        if pt>=10000: pt=pt/1000.0
         x,y=st.columns(2); cargas=x.number_input('Cargas separadas',min_value=0.0,step=1.0); ton=y.number_input('Peso separado (t)',min_value=0.0,step=0.1,format='%.2f')
-        st.info(f'Planejado diário da Separação: {pt:.3f} t' if pt else 'Planejamento diário ainda não cadastrado.')
+        st.info(f'Planejado diário da Separação: {pt:.1f} t' if pt else 'Planejamento diário ainda não cadastrado.')
         n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1))
         for i in range(n):
             st.markdown(f'**Pendência {i+1}**'); q1,q2,q3=st.columns(3); cg=q1.text_input('Carga',key=f'pcg{i}'); cli=q2.text_input('Cliente',key=f'pcl{i}'); sit=q3.selectbox('Situação',['P&D','Separação não iniciada','Em separação','Aguardando produto','Outra'],key=f'psi{i}'); q4,q5=st.columns(2); mot=q4.selectbox('Motivo',['Falta de produto','Sistema/Integração','Mão de obra','Equipamento','Qualidade','Operacional','Outro'],key=f'pmo{i}'); det=q5.text_input('Detalhe',key=f'pde{i}'); pend.append((cg,cli,sit,mot,det))
@@ -320,7 +323,7 @@ elif pagina=='📝 Nova Passagem':
     k1,k2,k3=st.columns(3)
     if operacao in ['CDA 01 - Separação','CDA 02']: k1.metric('Cargas',f'{cargas:g}',f'{gc:+g} vs planejado' if pc else 'Sem planejado'); k2.metric('Atingimento cargas',f'{ac:.1f}%' if pc else '—')
     if operacao in ['CDA 01 - Separação','CDA 01 - Carregamento','Estoque']: k3.metric('Atingimento toneladas',f'{at:.1f}%' if pt else '—')
-    if operacao=='CDA 01 - Carregamento': k1.metric('Cargas carregadas',f'{vc:g}'); k2.metric('Toneladas carregadas',f'{ton:.3f} t'); k3.metric('Para o próximo turno',f'{vp:g} cargas')
+    if operacao=='CDA 01 - Carregamento': k1.metric('Cargas carregadas',f'{vc:g}'); k2.metric('Toneladas carregadas',f'{ton:.1f} t'); k3.metric('Para o próximo turno',f'{vp:g} cargas')
 
     st.subheader('⚠️ Fechamento')
     of=st.selectbox('Principal ofensor',['Sem ofensor','Falta de produto/estoque','Mão de obra','Sistema/Integração','WMS/Körber','Atraso/ausência de veículo','Equipamento','Qualidade','Retrabalho','Operacional','Outro'])
