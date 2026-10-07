@@ -34,6 +34,45 @@ def init_db():
         situacao TEXT, motivo TEXT, detalhe TEXT)''')
     cur.execute('''CREATE TABLE IF NOT EXISTS ausencias_detalhe (
         id INTEGER PRIMARY KEY AUTOINCREMENT, passagem_id INTEGER, nome TEXT, motivo TEXT)''')
+    # Migração automática: mantém bancos de versões anteriores compatíveis
+    def ensure_columns(table, columns):
+        cur.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cur.fetchall()}
+        for name, definition in columns.items():
+            if name not in existing:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+    ensure_columns('passagens', {
+        'criado_em': 'TEXT', 'data': 'TEXT', 'turno': 'TEXT', 'area': 'TEXT',
+        'operacao': 'TEXT', 'responsavel': 'TEXT',
+        'headcount': 'INTEGER DEFAULT 0', 'ausencias': 'INTEGER DEFAULT 0',
+        'presentes': 'INTEGER DEFAULT 0', 'absenteismo': 'REAL DEFAULT 0',
+        'cargas_realizadas': 'REAL DEFAULT 0', 'toneladas_realizadas': 'REAL DEFAULT 0',
+        'veiculos_trabalhados': 'REAL DEFAULT 0', 'veiculos_carregados': 'REAL DEFAULT 0',
+        'veiculos_pendentes': 'REAL DEFAULT 0', 'uz_paletes': 'REAL DEFAULT 0',
+        'pd_espera': 'REAL DEFAULT 0', 'transbordo_total': 'REAL DEFAULT 0',
+        'toneladas_estoque': 'REAL DEFAULT 0', 'paletes_estoque': 'REAL DEFAULT 0',
+        'planejado_cargas': 'REAL DEFAULT 0', 'planejado_ton': 'REAL DEFAULT 0',
+        'planejado_veiculos': 'REAL DEFAULT 0', 'gap_cargas': 'REAL DEFAULT 0',
+        'gap_ton': 'REAL DEFAULT 0', 'gap_veiculos': 'REAL DEFAULT 0',
+        'ating_cargas': 'REAL DEFAULT 0', 'ating_ton': 'REAL DEFAULT 0',
+        'ating_veiculos': 'REAL DEFAULT 0', 'ofensor': 'TEXT',
+        'observacoes': 'TEXT', 'status': 'TEXT',
+        'recebimento_producao_kg': 'REAL DEFAULT 0',
+        'recebimento_producao_paletes': 'REAL DEFAULT 0',
+        'abastecimento_picking_kg': 'REAL DEFAULT 0',
+        'abastecimento_picking_paletes': 'REAL DEFAULT 0',
+        'carretas_descarregadas': 'INTEGER DEFAULT 0',
+        'carretas_armazenadas': 'INTEGER DEFAULT 0',
+        'carretas_aguardando': 'INTEGER DEFAULT 0',
+        'transbordos_cda02': 'INTEGER DEFAULT 0',
+        'reembalo_enviados': 'INTEGER DEFAULT 0',
+        'reprocesso_enviados': 'INTEGER DEFAULT 0',
+        'maquinas_paradas': 'INTEGER DEFAULT 0',
+        'equipamento_parado': 'TEXT',
+        'problema_equipamento': 'TEXT',
+        'pendencias_proximo_turno': 'TEXT'
+    })
     c.commit(); c.close()
 init_db()
 
@@ -133,6 +172,9 @@ elif pagina=='📝 Nova Passagem':
             x,y=st.columns(2); nome=x.text_input(f'Nome {i+1}',key=f'an{i}'); mot=y.selectbox(f'Motivo {i+1}',['Atestado','Falta','Afastado','Férias','Folga compensatória','Declaração médica','Outro'],key=f'am{i}'); aus_det.append((nome,mot))
 
     cargas=ton=vt=vc=vp=uz=pd_e=trans=ton_est=pal_est=0.0
+    receb_kg=receb_pal=abast_kg=abast_pal=0.0
+    car_desc=car_arm=car_agu=trans_cda02=reemb=reproc=maq_par=0
+    equip_parado=problema_equip=pend_prox=''
     pc=pt=pv=0.0
     pend=[]
     st.subheader('📦 Resultado do turno')
@@ -159,9 +201,36 @@ elif pagina=='📝 Nova Passagem':
         for col,nome in zip(cs2,['Estoque','Fornecedores','Outros']): tr.append(col.number_input(nome,min_value=0.0,step=1.0))
         trans=sum(tr); pt=pp
     else:
-        pt=scalar_plan(data_reg,turno,operacao,'Toneladas'); pp=scalar_plan(data_reg,turno,operacao,'Paletes')
-        x,y=st.columns(2); ton_est=x.number_input('Toneladas puxadas da produção',min_value=0.0,step=0.1); pal_est=y.number_input('Paletes movimentados',min_value=0.0,step=1.0)
-        st.info(f'Planejado: {pt:.2f} t | {pp:g} paletes')
+        st.markdown('### 🏭 Indicadores principais')
+        a1,a2=st.columns(2)
+        receb_kg=a1.number_input('Recebimento da Produção (kg)',min_value=0.0,step=100.0,format='%.0f')
+        receb_pal=a2.number_input('Paletes recebidos da Produção',min_value=0.0,step=1.0)
+        b1,b2=st.columns(2)
+        abast_kg=b1.number_input('Abastecimento do Picking (kg)',min_value=0.0,step=100.0,format='%.0f')
+        abast_pal=b2.number_input('Paletes abastecidos no Picking',min_value=0.0,step=1.0)
+
+        st.markdown('### 🚛 Movimentações / tarefas do turno')
+        m1,m2,m3,m4=st.columns(4)
+        car_desc=int(m1.number_input('Carretas descarregadas',min_value=0,step=1))
+        car_arm=int(m2.number_input('Carretas armazenadas',min_value=0,step=1))
+        car_agu=int(m3.number_input('Carretas aguardando',min_value=0,step=1))
+        trans_cda02=int(m4.number_input('Transbordos para CDA 02',min_value=0,step=1))
+        m5,m6,m7=st.columns(3)
+        reemb=int(m5.number_input('Reembalo enviados',min_value=0,step=1))
+        reproc=int(m6.number_input('Reprocesso enviados',min_value=0,step=1))
+        maq_par=int(m7.number_input('Máquinas paradas',min_value=0,step=1))
+
+        if maq_par:
+            e1,e2=st.columns(2)
+            equip_parado=e1.text_input('Equipamento / máquina')
+            problema_equip=e2.text_input('Problema do equipamento')
+
+        st.markdown('### ⏭️ Pendências para o próximo turno')
+        pend_prox=st.text_area('Pendências / informações que o próximo turno precisa receber',
+                               placeholder='Ex.: carreta aguardando descarga, placa, motorista, transferência pendente...')
+        ton_est=receb_kg/1000.0
+        pal_est=receb_pal
+        st.caption('Os indicadores principais do Estoque alimentarão o resumo semanal por turno.')
 
     gc=cargas-pc if pc else 0; gt=(ton if operacao=='CDA 01 - Separação' else ton_est)-pt if pt else 0; gv=vc-pv if pv else 0
     ac=pct(cargas,pc); at=pct((ton if operacao=='CDA 01 - Separação' else ton_est),pt); av=pct(vc,pv)
@@ -179,8 +248,20 @@ elif pagina=='📝 Nova Passagem':
         if not resp.strip(): st.error('Informe o responsável pela passagem.')
         elif aus>hc and hc>0: st.error('Ausências não pode ser maior que o headcount.')
         else:
-            c=conn();cur=c.cursor();cur.execute('''INSERT INTO passagens(criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,uz_paletes,pd_espera,transbordo_total,toneladas_estoque,paletes_estoque,planejado_cargas,planejado_ton,planejado_veiculos,gap_cargas,gap_ton,gap_veiculos,ating_cargas,ating_ton,ating_veiculos,ofensor,observacoes,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (datetime.now().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat)); pid=cur.lastrowid
+            c=conn();cur=c.cursor();cur.execute('''INSERT INTO passagens(
+            criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
+            cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
+            uz_paletes,pd_espera,transbordo_total,toneladas_estoque,paletes_estoque,
+            planejado_cargas,planejado_ton,planejado_veiculos,gap_cargas,gap_ton,gap_veiculos,
+            ating_cargas,ating_ton,ating_veiculos,ofensor,observacoes,status,
+            recebimento_producao_kg,recebimento_producao_paletes,abastecimento_picking_kg,abastecimento_picking_paletes,
+            carretas_descarregadas,carretas_armazenadas,carretas_aguardando,transbordos_cda02,
+            reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (datetime.now().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
+             cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
+             receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
+             equip_parado,problema_equip,pend_prox)); pid=cur.lastrowid
             for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,detalhe) VALUES(?,?,?,?,?,?)',(pid,*r))
             for n,m in aus_det:
                 if n.strip(): cur.execute('INSERT INTO ausencias_detalhe(passagem_id,nome,motivo) VALUES(?,?,?)',(pid,n,m))
@@ -194,7 +275,16 @@ elif pagina=='👁️ Visão Atual':
         latest=df.groupby(['operacao','turno'],as_index=False).first()
         for _,r in latest.iterrows():
             with st.expander(f"{r['operacao']} • {r['turno']} • {r['status']}",expanded=True):
-                c1,c2,c3,c4=st.columns(4); c1.metric('Responsável',r['responsavel']); c2.metric('Absenteísmo',f"{r['absenteismo']:.1f}%"); c3.metric('Cargas',f"{r['cargas_realizadas']:g}"); c4.metric('Toneladas',f"{r['toneladas_realizadas'] or r['toneladas_estoque']:.2f}")
+                if r['operacao']=='Estoque':
+                    c1,c2,c3,c4=st.columns(4)
+                    c1.metric('Recebimento Produção',f"{r['recebimento_producao_kg']:,.0f} kg".replace(',','.'))
+                    c2.metric('Paletes recebidos',f"{r['recebimento_producao_paletes']:g}")
+                    c3.metric('Abastecimento Picking',f"{r['abastecimento_picking_kg']:,.0f} kg".replace(',','.'))
+                    c4.metric('Paletes abastecidos',f"{r['abastecimento_picking_paletes']:g}")
+                    st.caption(f"Responsável: {r['responsavel']} • Absenteísmo: {r['absenteismo']:.1f}%")
+                    if r['pendencias_proximo_turno']: st.warning(r['pendencias_proximo_turno'])
+                else:
+                    c1,c2,c3,c4=st.columns(4); c1.metric('Responsável',r['responsavel']); c2.metric('Absenteísmo',f"{r['absenteismo']:.1f}%"); c3.metric('Cargas',f"{r['cargas_realizadas']:g}"); c4.metric('Toneladas',f"{r['toneladas_realizadas'] or r['toneladas_estoque']:.2f}")
                 if r['observacoes']: st.write(r['observacoes'])
 
 elif pagina=='📊 Semana':
@@ -208,6 +298,15 @@ elif pagina=='📊 Semana':
         chart=df.groupby('data',as_index=False).agg(Cargas=('cargas_realizadas','sum'),Toneladas=('toneladas_realizadas','sum'))
         st.markdown('#### Evolução diária'); st.line_chart(chart.set_index('data'))
         st.markdown('#### Por operação'); st.dataframe(df.groupby('operacao',as_index=False).agg(Passagens=('id','count'),Cargas=('cargas_realizadas','sum'),Toneladas=('toneladas_realizadas','sum'),Absenteismo_medio=('absenteismo','mean')),use_container_width=True,hide_index=True)
+        est=df[df.operacao=='Estoque'].copy()
+        if not est.empty:
+            st.markdown('#### 📦 Estoque — Produção × Picking por turno')
+            est_res=est.groupby('turno',as_index=False).agg(
+                Recebimento_kg=('recebimento_producao_kg','sum'),
+                Recebimento_paletes=('recebimento_producao_paletes','sum'),
+                Abastecimento_kg=('abastecimento_picking_kg','sum'),
+                Abastecimento_paletes=('abastecimento_picking_paletes','sum'))
+            st.dataframe(est_res,use_container_width=True,hide_index=True)
 
 elif pagina=='🕘 Histórico':
     st.header('🕘 Histórico')
