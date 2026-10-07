@@ -332,7 +332,36 @@ elif pagina=='📝 Nova Passagem':
         if not resp.strip(): st.error('Informe o responsável pela passagem.')
         elif aus>hc and hc>0: st.error('Ausências não pode ser maior que o headcount.')
         else:
-            c=conn();cur=c.cursor();cur.execute('''INSERT INTO passagens(
+            c=conn();cur=c.cursor()
+            # Defesa contra schema legado: recria a tabela passagens em formato limpo se houver
+            # qualquer coluna NOT NULL sem default além do id. Isso elimina IntegrityError de versões antigas.
+            info=cur.execute("PRAGMA table_info(passagens)").fetchall()
+            obrigatorias=[r for r in info if r[3]==1 and r[4] is None and r[1] != 'id']
+            if obrigatorias:
+                cur.execute("DROP TABLE IF EXISTS passagens_legado_backup")
+                cur.execute("ALTER TABLE passagens RENAME TO passagens_legado_backup")
+                cur.execute('''CREATE TABLE passagens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT,
+                    area TEXT, operacao TEXT, responsavel TEXT,
+                    headcount INTEGER DEFAULT 0, ausencias INTEGER DEFAULT 0, presentes INTEGER DEFAULT 0,
+                    absenteismo REAL DEFAULT 0,
+                    cargas_realizadas REAL DEFAULT 0, toneladas_realizadas REAL DEFAULT 0,
+                    veiculos_trabalhados REAL DEFAULT 0, veiculos_carregados REAL DEFAULT 0,
+                    veiculos_pendentes REAL DEFAULT 0, uz_paletes REAL DEFAULT 0, pd_espera REAL DEFAULT 0,
+                    transbordo_total REAL DEFAULT 0, toneladas_estoque REAL DEFAULT 0, paletes_estoque REAL DEFAULT 0,
+                    planejado_cargas REAL DEFAULT 0, planejado_ton REAL DEFAULT 0, planejado_veiculos REAL DEFAULT 0,
+                    gap_cargas REAL DEFAULT 0, gap_ton REAL DEFAULT 0, gap_veiculos REAL DEFAULT 0,
+                    ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
+                    ofensor TEXT, observacoes TEXT, status TEXT,
+                    recebimento_producao_kg REAL DEFAULT 0, recebimento_producao_paletes REAL DEFAULT 0,
+                    abastecimento_picking_kg REAL DEFAULT 0, abastecimento_picking_paletes REAL DEFAULT 0,
+                    carretas_descarregadas INTEGER DEFAULT 0, carretas_armazenadas INTEGER DEFAULT 0,
+                    carretas_aguardando INTEGER DEFAULT 0, transbordos_cda02 INTEGER DEFAULT 0,
+                    reembalo_enviados INTEGER DEFAULT 0, reprocesso_enviados INTEGER DEFAULT 0,
+                    maquinas_paradas INTEGER DEFAULT 0, equipamento_parado TEXT,
+                    problema_equipamento TEXT, pendencias_proximo_turno TEXT)''')
+                c.commit()
+            cur.execute('''INSERT INTO passagens(
             criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
             cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
             uz_paletes,pd_espera,transbordo_total,toneladas_estoque,paletes_estoque,
