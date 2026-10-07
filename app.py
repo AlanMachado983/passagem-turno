@@ -71,6 +71,53 @@ def init_db():
             ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
             ofensor TEXT, observacoes TEXT, status TEXT)''')
 
+    # Remove a restrição legada UNIQUE(data, turno, area).
+    # CDA 01 precisa aceitar Separação e Carregamento na mesma data/turno/área.
+    cur.execute("PRAGMA index_list(passagens)")
+    unique_indexes = [r for r in cur.fetchall() if r[2] == 1]
+    legacy_unique = False
+    for idx in unique_indexes:
+        idx_name = idx[1]
+        safe_idx = idx_name.replace("'", "''")
+        cur.execute(f"PRAGMA index_info('{safe_idx}')")
+        idx_cols = [r[2] for r in cur.fetchall()]
+        if set(idx_cols) == {'data','turno','area'} and len(idx_cols) == 3:
+            legacy_unique = True
+            break
+
+    if legacy_unique:
+        cur.execute("DROP TABLE IF EXISTS passagens_sem_unique_backup")
+        cur.execute("ALTER TABLE passagens RENAME TO passagens_sem_unique_backup")
+        cur.execute('''CREATE TABLE passagens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT,
+            area TEXT, operacao TEXT, responsavel TEXT,
+            headcount INTEGER DEFAULT 0, ausencias INTEGER DEFAULT 0, presentes INTEGER DEFAULT 0,
+            absenteismo REAL DEFAULT 0,
+            cargas_realizadas REAL DEFAULT 0, toneladas_realizadas REAL DEFAULT 0,
+            veiculos_trabalhados REAL DEFAULT 0, veiculos_carregados REAL DEFAULT 0,
+            veiculos_pendentes REAL DEFAULT 0, uz_paletes REAL DEFAULT 0, pd_espera REAL DEFAULT 0,
+            transbordo_total REAL DEFAULT 0, toneladas_estoque REAL DEFAULT 0, paletes_estoque REAL DEFAULT 0,
+            planejado_cargas REAL DEFAULT 0, planejado_ton REAL DEFAULT 0, planejado_veiculos REAL DEFAULT 0,
+            gap_cargas REAL DEFAULT 0, gap_ton REAL DEFAULT 0, gap_veiculos REAL DEFAULT 0,
+            ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
+            ofensor TEXT, observacoes TEXT, status TEXT,
+            recebimento_producao_kg REAL DEFAULT 0, recebimento_producao_paletes REAL DEFAULT 0,
+            abastecimento_picking_kg REAL DEFAULT 0, abastecimento_picking_paletes REAL DEFAULT 0,
+            carretas_descarregadas INTEGER DEFAULT 0, carretas_armazenadas INTEGER DEFAULT 0,
+            carretas_aguardando INTEGER DEFAULT 0, transbordos_cda02 INTEGER DEFAULT 0,
+            reembalo_enviados INTEGER DEFAULT 0, reprocesso_enviados INTEGER DEFAULT 0,
+            maquinas_paradas INTEGER DEFAULT 0, equipamento_parado TEXT,
+            problema_equipamento TEXT, pendencias_proximo_turno TEXT)''')
+
+        # Preserva os registros antigos nas colunas que existirem nos dois schemas.
+        old_cols = [r[1] for r in cur.execute("PRAGMA table_info(passagens_sem_unique_backup)").fetchall()]
+        new_cols = [r[1] for r in cur.execute("PRAGMA table_info(passagens)").fetchall()]
+        common = [cname for cname in old_cols if cname in new_cols]
+        if common:
+            cols_sql = ",".join(f'"{cname}"' for cname in common)
+            cur.execute(f'INSERT OR IGNORE INTO passagens ({cols_sql}) SELECT {cols_sql} FROM passagens_sem_unique_backup')
+        c.commit()
+
     ensure_columns('passagens', {
         'criado_em': 'TEXT', 'data': 'TEXT', 'turno': 'TEXT', 'area': 'TEXT',
         'operacao': 'TEXT', 'responsavel': 'TEXT',
