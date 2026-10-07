@@ -77,12 +77,41 @@ if pagina=='📋 Planejamento':
     vals={}
     cols=st.columns(len(inds))
     for col,ind in zip(cols,inds): vals[ind]=col.number_input(f'Planejado - {ind}',min_value=0.0,step=1.0)
-    if st.button('💾 Salvar planejamento',type='primary'):
+    if st.button('💾 Salvar / atualizar planejamento',type='primary'):
         c=conn(); cur=c.cursor()
-        for ind,v in vals.items(): cur.execute('INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em) VALUES(?,?,?,?,?,?)',(str(d),t,o,ind,v,datetime.now().isoformat(timespec='seconds')))
-        c.commit();c.close();st.success('Planejamento salvo.')
-    df=query('SELECT data,turno,operacao,indicador,planejado,atualizado_em FROM planejamento ORDER BY id DESC LIMIT 30')
-    st.dataframe(df,use_container_width=True,hide_index=True)
+        agora=datetime.now().isoformat(timespec='seconds')
+        for ind,v in vals.items():
+            existente=cur.execute('SELECT id FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? ORDER BY id DESC LIMIT 1',(str(d),t,o,ind)).fetchone()
+            if existente:
+                cur.execute('UPDATE planejamento SET planejado=?, atualizado_em=? WHERE id=?',(v,agora,existente[0]))
+                cur.execute('DELETE FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? AND id<>?',(str(d),t,o,ind,existente[0]))
+            else:
+                cur.execute('INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em) VALUES(?,?,?,?,?,?)',(str(d),t,o,ind,v,agora))
+        c.commit();c.close();st.success('Planejamento salvo/atualizado sem duplicidade.');st.rerun()
+
+    df=query('SELECT id,data,turno,operacao,indicador,planejado,atualizado_em FROM planejamento ORDER BY id DESC LIMIT 50')
+    st.dataframe(df.drop(columns=['id']),use_container_width=True,hide_index=True)
+
+    if not df.empty:
+        st.markdown('#### ✏️ Corrigir / 🗑️ excluir planejamento')
+        opcoes={f"#{int(r.id)} • {r.data} • {r.turno} • {r.operacao} • {r.indicador} = {r.planejado:g}":int(r.id) for _,r in df.iterrows()}
+        escolhido=st.selectbox('Selecione o registro',list(opcoes.keys()))
+        rid=opcoes[escolhido]
+        reg=df[df.id==rid].iloc[0]
+        e1,e2,e3=st.columns(3)
+        novo_turno=e1.selectbox('Turno corrigido',['T1','T2','T3'],index=['T1','T2','T3'].index(reg.turno),key='edit_turno_plan')
+        novo_valor=e2.number_input('Valor corrigido',min_value=0.0,value=float(reg.planejado),step=1.0,key='edit_valor_plan')
+        if e3.button('💾 Aplicar correção',use_container_width=True):
+            c=conn();cur=c.cursor()
+            conflito=cur.execute('SELECT id FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? AND id<>?',(reg.data,novo_turno,reg.operacao,reg.indicador,rid)).fetchone()
+            if conflito:
+                st.error('Já existe planejamento para essa Data + Turno + Operação + Indicador. Exclua ou ajuste o registro existente.')
+            else:
+                cur.execute('UPDATE planejamento SET turno=?, planejado=?, atualizado_em=? WHERE id=?',(novo_turno,novo_valor,datetime.now().isoformat(timespec='seconds'),rid));c.commit();c.close();st.success('Planejamento corrigido.');st.rerun()
+            if conflito: c.close()
+        confirmar=st.checkbox('Confirmo a exclusão do registro selecionado',key='conf_del_plan')
+        if st.button('🗑️ Excluir planejamento selecionado') and confirmar:
+            c=conn();cur=c.cursor();cur.execute('DELETE FROM planejamento WHERE id=?',(rid,));c.commit();c.close();st.success('Planejamento excluído.');st.rerun()
 
 elif pagina=='📝 Nova Passagem':
     st.header('📝 Nova passagem')
