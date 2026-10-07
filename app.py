@@ -8,6 +8,15 @@ st.set_page_config(page_title='Passagem de Turno | ADIMAX', page_icon='📦', la
 
 DB='passagem_turno.db'
 
+def em_toneladas(valor):
+    """Converte peso operacional em kg para toneladas; mantém valores já lançados em t."""
+    try:
+        v=float(valor or 0)
+        return v/1000.0 if abs(v)>=10000 else v
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def conn():
     return sqlite3.connect(DB, check_same_thread=False)
 
@@ -155,6 +164,12 @@ init_db()
 def query(sql, params=()):
     c=conn(); df=pd.read_sql_query(sql,c,params=params); c.close(); return df
 
+def normalizar_pesos_df(df):
+    if df is not None and not df.empty and 'toneladas_realizadas' in df.columns:
+        df=df.copy()
+        df['toneladas_realizadas']=df['toneladas_realizadas'].apply(em_toneladas)
+    return df
+
 def scalar_plan(d,t,o,i):
     df=query('SELECT planejado FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? ORDER BY id DESC LIMIT 1',(str(d),t,o,i))
     return float(df.iloc[0,0]) if not df.empty else 0.0
@@ -210,8 +225,8 @@ elif pagina=='🎯 Planejado do Dia':
         dados=dados.sort_values('id').groupby(['operacao','turno'],as_index=False).tail(1)
     sep=dados[dados.operacao=='CDA 01 - Separação'] if not dados.empty else pd.DataFrame()
     car=dados[dados.operacao=='CDA 01 - Carregamento'] if not dados.empty else pd.DataFrame()
-    real_sep=float(sep.toneladas_realizadas.sum()) if not sep.empty else 0.0
-    ton_car=float(car.toneladas_realizadas.sum()) if not car.empty else 0.0
+    real_sep=sum(em_toneladas(v) for v in sep.toneladas_realizadas) if not sep.empty else 0.0
+    ton_car=sum(em_toneladas(v) for v in car.toneladas_realizadas) if not car.empty else 0.0
     cargas_car=float(car.veiculos_carregados.sum()) if not car.empty else 0.0
     ating=pct(real_sep,plan_sep); gap=real_sep-plan_sep if plan_sep else 0.0
     st.markdown('### 📦 Separação')
@@ -222,7 +237,7 @@ elif pagina=='🎯 Planejado do Dia':
     cols=st.columns(3)
     for col,t in zip(cols,['T1','T2','T3']):
         v=0.0
-        if not sep.empty and not sep[sep.turno==t].empty: v=float(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
+        if not sep.empty and not sep[sep.turno==t].empty: v=em_toneladas(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
         col.metric(t,f'{v:.1f} t')
     st.markdown('---'); st.markdown('### 🚛 Carregamento')
     st.caption('Realizado do dia — sem planejamento por enquanto.')
@@ -232,7 +247,7 @@ elif pagina=='🎯 Planejado do Dia':
     for col,t in zip(cols,['T1','T2','T3']):
         n=0.0; peso=0.0
         if not car.empty and not car[car.turno==t].empty:
-            r=car[car.turno==t].iloc[-1]; n=float(r.veiculos_carregados); peso=float(r.toneladas_realizadas)
+            r=car[car.turno==t].iloc[-1]; n=float(r.veiculos_carregados); peso=em_toneladas(r.toneladas_realizadas)
         col.metric(t,f'{n:g} cargas',f'{peso:.1f} t')
     st.caption('Após a passagem do T3, este painel entrega o fechamento do dia para o GDD.')
 
@@ -323,7 +338,7 @@ elif pagina=='📝 Nova Passagem':
     k1,k2,k3=st.columns(3)
     if operacao in ['CDA 01 - Separação','CDA 02']: k1.metric('Cargas',f'{cargas:g}',f'{gc:+g} vs planejado' if pc else 'Sem planejado'); k2.metric('Atingimento cargas',f'{ac:.1f}%' if pc else '—')
     if operacao in ['CDA 01 - Separação','CDA 01 - Carregamento','Estoque']: k3.metric('Atingimento toneladas',f'{at:.1f}%' if pt else '—')
-    if operacao=='CDA 01 - Carregamento': k1.metric('Cargas carregadas',f'{vc:g}'); k2.metric('Toneladas carregadas',f'{ton:.1f} t'); k3.metric('Para o próximo turno',f'{vp:g} cargas')
+    if operacao=='CDA 01 - Carregamento': k1.metric('Cargas carregadas',f'{vc:g}'); k2.metric('Toneladas carregadas',f'{em_toneladas(ton):.1f} t'); k3.metric('Para o próximo turno',f'{vp:g} cargas')
 
     st.subheader('⚠️ Fechamento')
     of=st.selectbox('Principal ofensor',['Sem ofensor','Falta de produto/estoque','Mão de obra','Sistema/Integração','WMS/Körber','Atraso/ausência de veículo','Equipamento','Qualidade','Retrabalho','Operacional','Outro'])
