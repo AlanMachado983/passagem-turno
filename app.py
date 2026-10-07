@@ -233,6 +233,37 @@ elif pagina=='🎯 Planejado do Dia':
     ton_car=sum(em_toneladas(v) for v in car.toneladas_realizadas) if not car.empty else 0.0
     cargas_car=float(car.veiculos_carregados.sum()) if not car.empty else 0.0
     ating=pct(real_sep,plan_sep); gap=real_sep-plan_sep if plan_sep else 0.0
+    # Absenteísmo geral do dia: consolida a última passagem de cada turno,
+    # sem duplicar Separação e Carregamento do mesmo turno.
+    abs_dia=query("SELECT * FROM passagens WHERE data=? ORDER BY id",(str(d),))
+    hc_geral=0.0; aus_geral=0.0
+    abs_turnos={}
+    if not abs_dia.empty:
+        # Uma referência por turno. Se houver mais de uma operação no mesmo turno,
+        # usa a passagem mais recente para não contar o mesmo efetivo duas vezes.
+        ult_turno=abs_dia.sort_values('id').groupby('turno',as_index=False).tail(1)
+        hc_geral=float(ult_turno.headcount.sum())
+        aus_geral=float(ult_turno.ausencias.sum())
+        for t in ['T1','T2','T3']:
+            rt=ult_turno[ult_turno.turno==t]
+            if not rt.empty:
+                hc=float(rt.iloc[-1].headcount or 0); au=float(rt.iloc[-1].ausencias or 0)
+                abs_turnos[t]=(au/hc*100 if hc else 0.0,au,hc)
+            else:
+                abs_turnos[t]=(0.0,0.0,0.0)
+    else:
+        abs_turnos={t:(0.0,0.0,0.0) for t in ['T1','T2','T3']}
+    abs_geral=(aus_geral/hc_geral*100) if hc_geral else 0.0
+
+    st.markdown('### 👥 Absenteísmo Geral')
+    a1,a2,a3,a4=st.columns(4)
+    a1.metric('Geral do dia',f'{abs_geral:.1f}%')
+    for col,t in zip([a2,a3,a4],['T1','T2','T3']):
+        p,au,hc=abs_turnos[t]
+        col.metric(t,f'{p:.1f}%',f'{au:g} ausências | HC {hc:g}')
+    st.caption(f'Total do dia: {aus_geral:g} ausências | Headcount {hc_geral:g}')
+    st.markdown('---')
+
     st.markdown('### 📦 Separação')
     k1,k2,k3,k4=st.columns(4)
     k1.metric('Planejado do dia',f'{plan_sep:.1f} t'); k2.metric('Realizado acumulado',f'{real_sep:.1f} t')
