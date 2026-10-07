@@ -116,7 +116,9 @@ def init_db():
             carretas_aguardando INTEGER DEFAULT 0, transbordos_cda02 INTEGER DEFAULT 0,
             reembalo_enviados INTEGER DEFAULT 0, reprocesso_enviados INTEGER DEFAULT 0,
             maquinas_paradas INTEGER DEFAULT 0, equipamento_parado TEXT,
-            problema_equipamento TEXT, pendencias_proximo_turno TEXT)''')
+            problema_equipamento TEXT, pendencias_proximo_turno TEXT,
+                    varejo_cargas REAL DEFAULT 0, varejo_ton REAL DEFAULT 0,
+                    transferencias_qtd REAL DEFAULT 0, transferencias_ton REAL DEFAULT 0)''')
 
         # Preserva os registros antigos nas colunas que existirem nos dois schemas.
         old_cols = [r[1] for r in cur.execute("PRAGMA table_info(passagens_sem_unique_backup)").fetchall()]
@@ -156,7 +158,9 @@ def init_db():
         'maquinas_paradas': 'INTEGER DEFAULT 0',
         'equipamento_parado': 'TEXT',
         'problema_equipamento': 'TEXT',
-        'pendencias_proximo_turno': 'TEXT'
+        'pendencias_proximo_turno': 'TEXT',
+        'varejo_cargas': 'REAL DEFAULT 0', 'varejo_ton': 'REAL DEFAULT 0',
+        'transferencias_qtd': 'REAL DEFAULT 0', 'transferencias_ton': 'REAL DEFAULT 0'
     })
     c.commit(); c.close()
 init_db()
@@ -233,6 +237,18 @@ elif pagina=='🎯 Planejado do Dia':
     k1,k2,k3,k4=st.columns(4)
     k1.metric('Planejado do dia',f'{plan_sep:.1f} t'); k2.metric('Realizado acumulado',f'{real_sep:.1f} t')
     k3.metric('Atingimento',f'{ating:.1f}%' if plan_sep else '—'); k4.metric('Gap',f'{gap:+.1f} t' if plan_sep else '—')
+    varejo_t=0.0; transf_t=0.0; varejo_q=0.0; transf_q=0.0
+    if not sep.empty:
+        if 'varejo_ton' in sep.columns: varejo_t=sum(em_toneladas(v) for v in sep.varejo_ton)
+        if 'transferencias_ton' in sep.columns: transf_t=sum(em_toneladas(v) for v in sep.transferencias_ton)
+        if 'varejo_cargas' in sep.columns: varejo_q=float(sep.varejo_cargas.sum())
+        if 'transferencias_qtd' in sep.columns: transf_q=float(sep.transferencias_qtd.sum())
+    st.markdown('#### Composição da Separação')
+    a,b,c,d=st.columns(4)
+    a.metric('Cargas Varejo',f'{varejo_q:g}')
+    b.metric('Varejo',f'{varejo_t:.1f} t')
+    c.metric('Transferências',f'{transf_q:g}')
+    d.metric('Transferências',f'{transf_t:.1f} t')
     st.markdown('#### Realizado por turno — Separação')
     cols=st.columns(3)
     for col,t in zip(cols,['T1','T2','T3']):
@@ -268,6 +284,7 @@ elif pagina=='📝 Nova Passagem':
     aus_det=[]
 
     cargas=ton=vt=vc=vp=uz=pd_e=trans=ton_est=pal_est=0.0
+    varejo_cargas=varejo_ton=transferencias_qtd=transferencias_ton=0.0
     receb_kg=receb_pal=abast_kg=abast_pal=0.0
     car_desc=car_arm=car_agu=trans_cda02=reemb=reproc=maq_par=0
     equip_parado=problema_equip=pend_prox=''
@@ -277,7 +294,19 @@ elif pagina=='📝 Nova Passagem':
     if operacao=='CDA 01 - Separação':
         pc=0.0; pt=scalar_plan(data_reg,'DIA',operacao,'Toneladas')
         if pt>=10000: pt=pt/1000.0
-        x,y=st.columns(2); cargas=x.number_input('Cargas separadas',min_value=0.0,step=1.0); ton=y.number_input('Peso separado (t)',min_value=0.0,step=0.1,format='%.2f')
+        st.markdown('#### 🛒 Varejo')
+        x,y=st.columns(2)
+        varejo_cargas=x.number_input('Cargas Varejo',min_value=0.0,step=1.0)
+        varejo_ton=y.number_input('Toneladas Varejo',min_value=0.0,step=0.1,format='%.1f')
+        st.markdown('#### 🔄 Transferências')
+        x,y=st.columns(2)
+        transferencias_qtd=x.number_input('Quantidade de Transferências',min_value=0.0,step=1.0)
+        transferencias_ton=y.number_input('Toneladas de Transferências',min_value=0.0,step=0.1,format='%.1f')
+        cargas=varejo_cargas+transferencias_qtd
+        ton=varejo_ton+transferencias_ton
+        t1,t2=st.columns(2)
+        t1.metric('Total operações separadas',f'{cargas:g}')
+        t2.metric('Total separado no turno',f'{ton:.1f} t')
         st.info(f'Planejado diário da Separação: {pt:.1f} t' if pt else 'Planejamento diário ainda não cadastrado.')
         n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1))
         for i in range(n):
@@ -375,7 +404,9 @@ elif pagina=='📝 Nova Passagem':
                     carretas_aguardando INTEGER DEFAULT 0, transbordos_cda02 INTEGER DEFAULT 0,
                     reembalo_enviados INTEGER DEFAULT 0, reprocesso_enviados INTEGER DEFAULT 0,
                     maquinas_paradas INTEGER DEFAULT 0, equipamento_parado TEXT,
-                    problema_equipamento TEXT, pendencias_proximo_turno TEXT)''')
+                    problema_equipamento TEXT, pendencias_proximo_turno TEXT,
+                    varejo_cargas REAL DEFAULT 0, varejo_ton REAL DEFAULT 0,
+                    transferencias_qtd REAL DEFAULT 0, transferencias_ton REAL DEFAULT 0)''')
                 c.commit()
             cur.execute('''INSERT INTO passagens(
             criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
@@ -385,12 +416,13 @@ elif pagina=='📝 Nova Passagem':
             ating_cargas,ating_ton,ating_veiculos,ofensor,observacoes,status,
             recebimento_producao_kg,recebimento_producao_paletes,abastecimento_picking_kg,abastecimento_picking_paletes,
             carretas_descarregadas,carretas_armazenadas,carretas_aguardando,transbordos_cda02,
-            reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
+            varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (datetime.now().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
              cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
              receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
-             equip_parado,problema_equip,pend_prox)); pid=cur.lastrowid
+             equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton)); pid=cur.lastrowid
             for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,detalhe) VALUES(?,?,?,?,?,?)',(pid,*r))
             for n,m in aus_det:
                 if n.strip(): cur.execute('INSERT INTO ausencias_detalhe(passagem_id,nome,motivo) VALUES(?,?,?)',(pid,n,m))
