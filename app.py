@@ -179,108 +179,60 @@ with st.sidebar:
     pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
 
 if pagina=='📋 Planejamento':
-    st.header('📋 Planejamento do turno')
-    c1,c2,c3=st.columns(3)
-    d=c1.date_input('Data',date.today()); t=c2.selectbox('Turno',['T1','T2','T3']); o=c3.selectbox('Operação',['CDA 01 - Separação','CDA 01 - Carregamento','CDA 02','Estoque'])
-    st.caption('Cadastre apenas os indicadores que possuem planejamento confiável.')
-    if o=='CDA 01 - Separação': inds=['Cargas','Toneladas']
-    elif o=='CDA 01 - Carregamento': inds=['Veículos','Toneladas']
-    elif o=='CDA 02': inds=['Cargas','Paletes/UZs']
-    else: inds=['Toneladas','Paletes']
-    vals={}
-    cols=st.columns(len(inds))
-    for col,ind in zip(cols,inds): vals[ind]=col.number_input(f'Planejado - {ind}',min_value=0.0,step=1.0)
-    if st.button('💾 Salvar / atualizar planejamento',type='primary'):
-        c=conn(); cur=c.cursor()
-        agora=datetime.now().isoformat(timespec='seconds')
-        for ind,v in vals.items():
-            existente=cur.execute('SELECT id FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? ORDER BY id DESC LIMIT 1',(str(d),t,o,ind)).fetchone()
-            if existente:
-                cur.execute('UPDATE planejamento SET planejado=?, atualizado_em=? WHERE id=?',(v,agora,existente[0]))
-                cur.execute('DELETE FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? AND id<>?',(str(d),t,o,ind,existente[0]))
-            else:
-                cur.execute('INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em) VALUES(?,?,?,?,?,?)',(str(d),t,o,ind,v,agora))
-        c.commit();c.close();st.success('Planejamento salvo/atualizado sem duplicidade.');st.rerun()
-
-    df=query('SELECT id,data,turno,operacao,indicador,planejado,atualizado_em FROM planejamento ORDER BY id DESC LIMIT 50')
-    st.dataframe(df.drop(columns=['id']),use_container_width=True,hide_index=True)
-
+    st.header('📋 Planejamento diário')
+    st.caption('Por enquanto, o planejamento diário é somente de toneladas de Separação.')
+    c1,c2=st.columns(2)
+    d=c1.date_input('Data',date.today())
+    valor=c2.number_input('Toneladas planejadas de Separação no dia',min_value=0.0,step=1.0,format='%.3f')
+    if st.button('💾 Salvar / atualizar planejamento diário',type='primary'):
+        c=conn(); cur=c.cursor(); agora=datetime.now().isoformat(timespec='seconds')
+        existente=cur.execute("SELECT id FROM planejamento WHERE data=? AND turno='DIA' AND operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY id DESC LIMIT 1",(str(d),)).fetchone()
+        if existente:
+            cur.execute('UPDATE planejamento SET planejado=?, atualizado_em=? WHERE id=?',(valor,agora,existente[0]))
+        else:
+            cur.execute("INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em) VALUES(?,'DIA','CDA 01 - Separação','Toneladas',?,?)",(str(d),valor,agora))
+        c.commit(); c.close(); st.success('Planejamento diário salvo.'); st.rerun()
+    df=query("SELECT id,data,planejado,atualizado_em FROM planejamento WHERE turno='DIA' AND operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY data DESC,id DESC LIMIT 50")
     if not df.empty:
-        st.markdown('#### ✏️ Corrigir / 🗑️ excluir planejamento')
-        opcoes={f"#{int(r.id)} • {r.data} • {r.turno} • {r.operacao} • {r.indicador} = {r.planejado:g}":int(r.id) for _,r in df.iterrows()}
-        escolhido=st.selectbox('Selecione o registro',list(opcoes.keys()))
-        rid=opcoes[escolhido]
-        reg=df[df.id==rid].iloc[0]
-        e1,e2,e3=st.columns(3)
-        novo_turno=e1.selectbox('Turno corrigido',['T1','T2','T3'],index=['T1','T2','T3'].index(reg.turno),key='edit_turno_plan')
-        novo_valor=e2.number_input('Valor corrigido',min_value=0.0,value=float(reg.planejado),step=1.0,key='edit_valor_plan')
-        if e3.button('💾 Aplicar correção',use_container_width=True):
-            c=conn();cur=c.cursor()
-            conflito=cur.execute('SELECT id FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? AND id<>?',(reg.data,novo_turno,reg.operacao,reg.indicador,rid)).fetchone()
-            if conflito:
-                st.error('Já existe planejamento para essa Data + Turno + Operação + Indicador. Exclua ou ajuste o registro existente.')
-            else:
-                cur.execute('UPDATE planejamento SET turno=?, planejado=?, atualizado_em=? WHERE id=?',(novo_turno,novo_valor,datetime.now().isoformat(timespec='seconds'),rid));c.commit();c.close();st.success('Planejamento corrigido.');st.rerun()
-            if conflito: c.close()
-        confirmar=st.checkbox('Confirmo a exclusão do registro selecionado',key='conf_del_plan')
-        if st.button('🗑️ Excluir planejamento selecionado') and confirmar:
-            c=conn();cur=c.cursor();cur.execute('DELETE FROM planejamento WHERE id=?',(rid,));c.commit();c.close();st.success('Planejamento excluído.');st.rerun()
+        ex=df.rename(columns={'data':'Data','planejado':'Planejado Separação (t)','atualizado_em':'Atualizado em'})
+        st.dataframe(ex.drop(columns=['id']),width='stretch',hide_index=True)
+    else: st.info('Ainda não existe planejamento diário cadastrado.')
 
 elif pagina=='🎯 Planejado do Dia':
     st.header('🎯 Painel de Gestão à Vista')
-    st.caption('Logística • acompanhamento diário em toneladas • atualizado pelas passagens dos turnos')
+    st.caption('Logística • fechamento diário para acompanhamento e GDD')
     d=st.date_input('Data do painel',date.today(),key='data_painel_dia')
-
-    ops=['CDA 01 - Separação','CDA 01 - Carregamento']
-    turnos=['T1','T2','T3']
-    linhas=[]
-    for op in ops:
-        for t in turnos:
-            plan=scalar_plan(d,t,op,'Toneladas')
-            real_df=query('''SELECT toneladas_realizadas FROM passagens
-                             WHERE data=? AND turno=? AND operacao=?
-                             ORDER BY id DESC LIMIT 1''',(str(d),t,op))
-            real=float(real_df.iloc[0,0]) if not real_df.empty else 0.0
-            linhas.append({'Operação':op,'Turno':t,'Planejado':plan,'Realizado':real,
-                           'Atingimento':pct(real,plan) if plan else 0.0})
-    painel=pd.DataFrame(linhas)
-
-    plan_total=float(painel['Planejado'].sum())
-    real_total=float(painel['Realizado'].sum())
-    ating_total=pct(real_total,plan_total)
-    gap_total=real_total-plan_total
-
+    plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
+    dados=query("SELECT * FROM passagens WHERE data=? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d),))
+    if not dados.empty:
+        dados=dados.sort_values('id').groupby(['operacao','turno'],as_index=False).tail(1)
+    sep=dados[dados.operacao=='CDA 01 - Separação'] if not dados.empty else pd.DataFrame()
+    car=dados[dados.operacao=='CDA 01 - Carregamento'] if not dados.empty else pd.DataFrame()
+    real_sep=float(sep.toneladas_realizadas.sum()) if not sep.empty else 0.0
+    ton_car=float(car.toneladas_realizadas.sum()) if not car.empty else 0.0
+    cargas_car=float(car.veiculos_carregados.sum()) if not car.empty else 0.0
+    ating=pct(real_sep,plan_sep); gap=real_sep-plan_sep if plan_sep else 0.0
+    st.markdown('### 📦 Separação')
     k1,k2,k3,k4=st.columns(4)
-    k1.metric('Planejado do Dia',f'{plan_total:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
-    k2.metric('Realizado até agora',f'{real_total:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
-    k3.metric('Atingimento',f'{ating_total:.1f}%'.replace('.',','))
-    k4.metric('Gap',f'{gap_total:+,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
-
-    st.markdown('### Planejado do Dia — Separação e Carregamento')
-    cols=st.columns(2)
-    for col,op in zip(cols,ops):
-        sub=painel[painel['Operação']==op].copy()
-        p=float(sub.Planejado.sum()); r=float(sub.Realizado.sum()); a=pct(r,p); g=r-p
-        titulo='📦 CDA 01 — Separação' if 'Separação' in op else '🚛 CDA 01 — Carregamento'
-        with col:
-            st.markdown(f'#### {titulo}')
-            st.metric('Planejado do dia',f'{p:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
-            for _,row in sub.iterrows():
-                c1,c2,c3=st.columns(3)
-                c1.write(f"**{row['Turno']}**")
-                c2.metric('Realizado',f"{row['Realizado']:,.3f} t".replace(',','X').replace('.',',').replace('X','.'))
-                c3.metric('Atingimento',f"{row['Atingimento']:.1f}%".replace('.',',') if row['Planejado'] else '—')
-            a1,a2,a3=st.columns(3)
-            a1.metric('Realizado do dia',f'{r:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
-            a2.metric('Atingimento',f'{a:.1f}%'.replace('.',',') if p else '—')
-            a3.metric('Gap',f'{g:+,.3f} t'.replace(',','X').replace('.',',').replace('X','.') if p else '—')
-
-    st.markdown('### Resumo por turno')
-    resumo=painel.pivot(index='Turno',columns='Operação',values=['Planejado','Realizado']).fillna(0)
-    resumo.columns=[' - '.join(c) for c in resumo.columns]
-    resumo=resumo.reset_index()
-    st.dataframe(resumo,use_container_width=True,hide_index=True)
-    st.caption('Ao final do T3, esta tela fica pronta para o fechamento do GDD da manhã.')
+    k1.metric('Planejado do dia',f'{plan_sep:.3f} t'); k2.metric('Realizado acumulado',f'{real_sep:.3f} t')
+    k3.metric('Atingimento',f'{ating:.1f}%' if plan_sep else '—'); k4.metric('Gap',f'{gap:+.3f} t' if plan_sep else '—')
+    st.markdown('#### Realizado por turno — Separação')
+    cols=st.columns(3)
+    for col,t in zip(cols,['T1','T2','T3']):
+        v=0.0
+        if not sep.empty and not sep[sep.turno==t].empty: v=float(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
+        col.metric(t,f'{v:.3f} t')
+    st.markdown('---'); st.markdown('### 🚛 Carregamento')
+    st.caption('Realizado do dia — sem planejamento por enquanto.')
+    c1,c2=st.columns(2); c1.metric('Cargas carregadas no dia',f'{cargas_car:g}'); c2.metric('Toneladas carregadas no dia',f'{ton_car:.3f} t')
+    st.markdown('#### Realizado por turno — Carregamento')
+    cols=st.columns(3)
+    for col,t in zip(cols,['T1','T2','T3']):
+        n=0.0; peso=0.0
+        if not car.empty and not car[car.turno==t].empty:
+            r=car[car.turno==t].iloc[-1]; n=float(r.veiculos_carregados); peso=float(r.toneladas_realizadas)
+        col.metric(t,f'{n:g} cargas',f'{peso:.3f} t')
+    st.caption('Após a passagem do T3, este painel entrega o fechamento do dia para o GDD.')
 
 elif pagina=='📝 Nova Passagem':
     st.header('📝 Nova passagem')
@@ -306,20 +258,19 @@ elif pagina=='📝 Nova Passagem':
     pend=[]
     st.subheader('📦 Resultado do turno')
     if operacao=='CDA 01 - Separação':
-        pc=scalar_plan(data_reg,turno,operacao,'Cargas'); pt=scalar_plan(data_reg,turno,operacao,'Toneladas')
+        pc=0.0; pt=scalar_plan(data_reg,'DIA',operacao,'Toneladas')
         x,y=st.columns(2); cargas=x.number_input('Cargas separadas',min_value=0.0,step=1.0); ton=y.number_input('Peso separado (t)',min_value=0.0,step=0.1,format='%.2f')
-        st.info(f'Planejado: {pc:g} cargas | {pt:.2f} t')
+        st.info(f'Planejado diário da Separação: {pt:.3f} t' if pt else 'Planejamento diário ainda não cadastrado.')
         n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1))
         for i in range(n):
             st.markdown(f'**Pendência {i+1}**'); q1,q2,q3=st.columns(3); cg=q1.text_input('Carga',key=f'pcg{i}'); cli=q2.text_input('Cliente',key=f'pcl{i}'); sit=q3.selectbox('Situação',['P&D','Separação não iniciada','Em separação','Aguardando produto','Outra'],key=f'psi{i}'); q4,q5=st.columns(2); mot=q4.selectbox('Motivo',['Falta de produto','Sistema/Integração','Mão de obra','Equipamento','Qualidade','Operacional','Outro'],key=f'pmo{i}'); det=q5.text_input('Detalhe',key=f'pde{i}'); pend.append((cg,cli,sit,mot,det))
     elif operacao=='CDA 01 - Carregamento':
-        pv=scalar_plan(data_reg,turno,operacao,'Veículos')
-        pt=scalar_plan(data_reg,turno,operacao,'Toneladas')
+        pv=0.0
+        pt=0.0
         x,y,z=st.columns(3)
         vc=x.number_input('Veículos carregados',min_value=0.0,step=1.0)
         vp=y.number_input('Veículos para o próximo turno',min_value=0.0,step=1.0)
         ton=z.number_input('Toneladas carregadas no turno (t)',min_value=0.0,step=0.1,format='%.3f')
-        st.info(f'Planejado: {pv:g} veículos | {pt:.3f} t')
         for i in range(int(vp)):
             st.markdown(f'**Veículo pendente {i+1}**'); q1,q2=st.columns(2); cg=q1.text_input('Carga',key=f'vcg{i}'); mot=q2.selectbox('Motivo',['Carga não integrada','Separação não iniciada','Veículo não se apresentou','Carga batida / próximo turno','Falta de produto','T.I./Körber','Problema operacional','Outro'],key=f'vmo{i}'); det=st.text_input('Detalhe / observação',key=f'vde{i}'); pend.append((cg,'','Carregamento pendente',mot,det))
     elif operacao=='CDA 02':
@@ -369,7 +320,7 @@ elif pagina=='📝 Nova Passagem':
     k1,k2,k3=st.columns(3)
     if operacao in ['CDA 01 - Separação','CDA 02']: k1.metric('Cargas',f'{cargas:g}',f'{gc:+g} vs planejado' if pc else 'Sem planejado'); k2.metric('Atingimento cargas',f'{ac:.1f}%' if pc else '—')
     if operacao in ['CDA 01 - Separação','CDA 01 - Carregamento','Estoque']: k3.metric('Atingimento toneladas',f'{at:.1f}%' if pt else '—')
-    if operacao=='CDA 01 - Carregamento': k1.metric('Veículos carregados',f'{vc:g}',f'{gv:+g} vs planejado' if pv else 'Sem planejado'); k2.metric('Atingimento veículos',f'{av:.1f}%' if pv else '—'); k3.metric('Toneladas carregadas',f'{ton:.3f} t',f'{gt:+.3f} t vs planejado' if pt else 'Sem planejado')
+    if operacao=='CDA 01 - Carregamento': k1.metric('Cargas carregadas',f'{vc:g}'); k2.metric('Toneladas carregadas',f'{ton:.3f} t'); k3.metric('Para o próximo turno',f'{vp:g} cargas')
 
     st.subheader('⚠️ Fechamento')
     of=st.selectbox('Principal ofensor',['Sem ofensor','Falta de produto/estoque','Mão de obra','Sistema/Integração','WMS/Körber','Atraso/ausência de veículo','Equipamento','Qualidade','Retrabalho','Operacional','Outro'])
