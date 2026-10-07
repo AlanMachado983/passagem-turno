@@ -42,6 +42,35 @@ def init_db():
             if name not in existing:
                 cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
+    # Corrige banco legado com colunas antigas obrigatórias (NOT NULL).
+    cur.execute("PRAGMA table_info(passagens)")
+    legacy_required = [r[1] for r in cur.fetchall()
+                       if r[3] == 1 and r[4] is None and r[1] != 'id']
+    v4_cols = {
+        'criado_em','data','turno','area','operacao','responsavel','headcount','ausencias','presentes',
+        'absenteismo','cargas_realizadas','toneladas_realizadas','veiculos_trabalhados','veiculos_carregados',
+        'veiculos_pendentes','uz_paletes','pd_espera','transbordo_total','toneladas_estoque','paletes_estoque',
+        'planejado_cargas','planejado_ton','planejado_veiculos','gap_cargas','gap_ton','gap_veiculos',
+        'ating_cargas','ating_ton','ating_veiculos','ofensor','observacoes','status'
+    }
+    incompatible = [c for c in legacy_required if c not in v4_cols]
+    if incompatible:
+        cur.execute("DROP TABLE IF EXISTS passagens_legado_backup")
+        cur.execute("ALTER TABLE passagens RENAME TO passagens_legado_backup")
+        cur.execute('''CREATE TABLE passagens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT,
+            area TEXT, operacao TEXT, responsavel TEXT,
+            headcount INTEGER DEFAULT 0, ausencias INTEGER DEFAULT 0, presentes INTEGER DEFAULT 0,
+            absenteismo REAL DEFAULT 0,
+            cargas_realizadas REAL DEFAULT 0, toneladas_realizadas REAL DEFAULT 0,
+            veiculos_trabalhados REAL DEFAULT 0, veiculos_carregados REAL DEFAULT 0,
+            veiculos_pendentes REAL DEFAULT 0, uz_paletes REAL DEFAULT 0, pd_espera REAL DEFAULT 0,
+            transbordo_total REAL DEFAULT 0, toneladas_estoque REAL DEFAULT 0, paletes_estoque REAL DEFAULT 0,
+            planejado_cargas REAL DEFAULT 0, planejado_ton REAL DEFAULT 0, planejado_veiculos REAL DEFAULT 0,
+            gap_cargas REAL DEFAULT 0, gap_ton REAL DEFAULT 0, gap_veiculos REAL DEFAULT 0,
+            ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
+            ofensor TEXT, observacoes TEXT, status TEXT)''')
+
     ensure_columns('passagens', {
         'criado_em': 'TEXT', 'data': 'TEXT', 'turno': 'TEXT', 'area': 'TEXT',
         'operacao': 'TEXT', 'responsavel': 'TEXT',
@@ -95,14 +124,12 @@ st.markdown('''<style>
 .block-container{padding-top:1.1rem}.hero{background:linear-gradient(90deg,#111,#2a2a2a);padding:22px 28px;border-radius:16px;border-left:8px solid #f5b400;color:white;margin-bottom:16px}.hero h1{margin:0;font-size:34px}.hero p{margin:5px 0 0;color:#ddd}.kpi{border:1px solid #e6e6e6;border-radius:14px;padding:14px;background:white}.stButton>button{border-radius:10px;font-weight:700}.status{font-size:22px;font-weight:800}.small{color:#666;font-size:13px}
 </style>''',unsafe_allow_html=True)
 
-if os.path.exists('assets/fabrica.png'):
-    st.image('assets/fabrica.png', use_container_width=True)
 st.markdown('<div class="hero"><h1>Passagem de Turno</h1><p>Logística • CDA 01 • CDA 02 • Estoque</p></div>',unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown('## ADIMAX')
     if os.path.exists('assets/caminhoes.png'): st.image('assets/caminhoes.png',use_container_width=True)
-    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
+    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
 
 if pagina=='📋 Planejamento':
     st.header('📋 Planejamento do turno')
@@ -110,7 +137,7 @@ if pagina=='📋 Planejamento':
     d=c1.date_input('Data',date.today()); t=c2.selectbox('Turno',['T1','T2','T3']); o=c3.selectbox('Operação',['CDA 01 - Separação','CDA 01 - Carregamento','CDA 02','Estoque'])
     st.caption('Cadastre apenas os indicadores que possuem planejamento confiável.')
     if o=='CDA 01 - Separação': inds=['Cargas','Toneladas']
-    elif o=='CDA 01 - Carregamento': inds=['Veículos']
+    elif o=='CDA 01 - Carregamento': inds=['Veículos','Toneladas']
     elif o=='CDA 02': inds=['Cargas','Paletes/UZs']
     else: inds=['Toneladas','Paletes']
     vals={}
@@ -152,6 +179,62 @@ if pagina=='📋 Planejamento':
         if st.button('🗑️ Excluir planejamento selecionado') and confirmar:
             c=conn();cur=c.cursor();cur.execute('DELETE FROM planejamento WHERE id=?',(rid,));c.commit();c.close();st.success('Planejamento excluído.');st.rerun()
 
+elif pagina=='🎯 Planejado do Dia':
+    st.header('🎯 Painel de Gestão à Vista')
+    st.caption('Logística • acompanhamento diário em toneladas • atualizado pelas passagens dos turnos')
+    d=st.date_input('Data do painel',date.today(),key='data_painel_dia')
+
+    ops=['CDA 01 - Separação','CDA 01 - Carregamento']
+    turnos=['T1','T2','T3']
+    linhas=[]
+    for op in ops:
+        for t in turnos:
+            plan=scalar_plan(d,t,op,'Toneladas')
+            real_df=query('''SELECT toneladas_realizadas FROM passagens
+                             WHERE data=? AND turno=? AND operacao=?
+                             ORDER BY id DESC LIMIT 1''',(str(d),t,op))
+            real=float(real_df.iloc[0,0]) if not real_df.empty else 0.0
+            linhas.append({'Operação':op,'Turno':t,'Planejado':plan,'Realizado':real,
+                           'Atingimento':pct(real,plan) if plan else 0.0})
+    painel=pd.DataFrame(linhas)
+
+    plan_total=float(painel['Planejado'].sum())
+    real_total=float(painel['Realizado'].sum())
+    ating_total=pct(real_total,plan_total)
+    gap_total=real_total-plan_total
+
+    k1,k2,k3,k4=st.columns(4)
+    k1.metric('Planejado do Dia',f'{plan_total:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
+    k2.metric('Realizado até agora',f'{real_total:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
+    k3.metric('Atingimento',f'{ating_total:.1f}%'.replace('.',','))
+    k4.metric('Gap',f'{gap_total:+,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
+
+    st.markdown('### Planejado do Dia — Separação e Carregamento')
+    cols=st.columns(2)
+    for col,op in zip(cols,ops):
+        sub=painel[painel['Operação']==op].copy()
+        p=float(sub.Planejado.sum()); r=float(sub.Realizado.sum()); a=pct(r,p); g=r-p
+        titulo='📦 CDA 01 — Separação' if 'Separação' in op else '🚛 CDA 01 — Carregamento'
+        with col:
+            st.markdown(f'#### {titulo}')
+            st.metric('Planejado do dia',f'{p:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
+            for _,row in sub.iterrows():
+                c1,c2,c3=st.columns(3)
+                c1.write(f"**{row['Turno']}**")
+                c2.metric('Realizado',f"{row['Realizado']:,.3f} t".replace(',','X').replace('.',',').replace('X','.'))
+                c3.metric('Atingimento',f"{row['Atingimento']:.1f}%".replace('.',',') if row['Planejado'] else '—')
+            a1,a2,a3=st.columns(3)
+            a1.metric('Realizado do dia',f'{r:,.3f} t'.replace(',','X').replace('.',',').replace('X','.'))
+            a2.metric('Atingimento',f'{a:.1f}%'.replace('.',',') if p else '—')
+            a3.metric('Gap',f'{g:+,.3f} t'.replace(',','X').replace('.',',').replace('X','.') if p else '—')
+
+    st.markdown('### Resumo por turno')
+    resumo=painel.pivot(index='Turno',columns='Operação',values=['Planejado','Realizado']).fillna(0)
+    resumo.columns=[' - '.join(c) for c in resumo.columns]
+    resumo=resumo.reset_index()
+    st.dataframe(resumo,use_container_width=True,hide_index=True)
+    st.caption('Ao final do T3, esta tela fica pronta para o fechamento do GDD da manhã.')
+
 elif pagina=='📝 Nova Passagem':
     st.header('📝 Nova passagem')
     a,b,c,dcol=st.columns(4)
@@ -184,8 +267,12 @@ elif pagina=='📝 Nova Passagem':
             st.markdown(f'**Pendência {i+1}**'); q1,q2,q3=st.columns(3); cg=q1.text_input('Carga',key=f'pcg{i}'); cli=q2.text_input('Cliente',key=f'pcl{i}'); sit=q3.selectbox('Situação',['P&D','Separação não iniciada','Em separação','Aguardando produto','Outra'],key=f'psi{i}'); q4,q5=st.columns(2); mot=q4.selectbox('Motivo',['Falta de produto','Sistema/Integração','Mão de obra','Equipamento','Qualidade','Operacional','Outro'],key=f'pmo{i}'); det=q5.text_input('Detalhe',key=f'pde{i}'); pend.append((cg,cli,sit,mot,det))
     elif operacao=='CDA 01 - Carregamento':
         pv=scalar_plan(data_reg,turno,operacao,'Veículos')
-        x,y=st.columns(2); vt=x.number_input('Veículos pegos para carregar',min_value=0.0,step=1.0); vp=y.number_input('Veículos que ficaram para o próximo turno',min_value=0.0,step=1.0); vc=max(vt-vp,0)
-        st.metric('Veículos carregados no turno',f'{vc:g}'); st.info(f'Planejado: {pv:g} veículos')
+        pt=scalar_plan(data_reg,turno,operacao,'Toneladas')
+        x,y,z=st.columns(3)
+        vc=x.number_input('Veículos carregados',min_value=0.0,step=1.0)
+        vp=y.number_input('Veículos para o próximo turno',min_value=0.0,step=1.0)
+        ton=z.number_input('Toneladas carregadas no turno (t)',min_value=0.0,step=0.1,format='%.3f')
+        st.info(f'Planejado: {pv:g} veículos | {pt:.3f} t')
         for i in range(int(vp)):
             st.markdown(f'**Veículo pendente {i+1}**'); q1,q2=st.columns(2); cg=q1.text_input('Carga',key=f'vcg{i}'); mot=q2.selectbox('Motivo',['Carga não integrada','Separação não iniciada','Veículo não se apresentou','Carga batida / próximo turno','Falta de produto','T.I./Körber','Problema operacional','Outro'],key=f'vmo{i}'); det=st.text_input('Detalhe / observação',key=f'vde{i}'); pend.append((cg,'','Carregamento pendente',mot,det))
     elif operacao=='CDA 02':
@@ -229,13 +316,13 @@ elif pagina=='📝 Nova Passagem':
         pal_est=receb_pal
         st.caption('Os indicadores principais do Estoque alimentarão o resumo semanal por turno.')
 
-    gc=cargas-pc if pc else 0; gt=(ton if operacao=='CDA 01 - Separação' else ton_est)-pt if pt else 0; gv=vc-pv if pv else 0
-    ac=pct(cargas,pc); at=pct((ton if operacao=='CDA 01 - Separação' else ton_est),pt); av=pct(vc,pv)
+    gc=cargas-pc if pc else 0; real_ton=(ton if operacao in ['CDA 01 - Separação','CDA 01 - Carregamento'] else ton_est); gt=real_ton-pt if pt else 0; gv=vc-pv if pv else 0
+    ac=pct(cargas,pc); at=pct(real_ton,pt); av=pct(vc,pv)
     st.subheader('🎯 Planejado × Realizado')
     k1,k2,k3=st.columns(3)
     if operacao in ['CDA 01 - Separação','CDA 02']: k1.metric('Cargas',f'{cargas:g}',f'{gc:+g} vs planejado' if pc else 'Sem planejado'); k2.metric('Atingimento cargas',f'{ac:.1f}%' if pc else '—')
-    if operacao in ['CDA 01 - Separação','Estoque']: k3.metric('Atingimento toneladas',f'{at:.1f}%' if pt else '—')
-    if operacao=='CDA 01 - Carregamento': k1.metric('Carregados',f'{vc:g}',f'{gv:+g} vs planejado' if pv else 'Sem planejado'); k2.metric('Atingimento',f'{av:.1f}%' if pv else '—')
+    if operacao in ['CDA 01 - Separação','CDA 01 - Carregamento','Estoque']: k3.metric('Atingimento toneladas',f'{at:.1f}%' if pt else '—')
+    if operacao=='CDA 01 - Carregamento': k1.metric('Veículos carregados',f'{vc:g}',f'{gv:+g} vs planejado' if pv else 'Sem planejado'); k2.metric('Atingimento veículos',f'{av:.1f}%' if pv else '—'); k3.metric('Toneladas carregadas',f'{ton:.3f} t',f'{gt:+.3f} t vs planejado' if pt else 'Sem planejado')
 
     st.subheader('⚠️ Fechamento')
     of=st.selectbox('Principal ofensor',['Sem ofensor','Falta de produto/estoque','Mão de obra','Sistema/Integração','WMS/Körber','Atraso/ausência de veículo','Equipamento','Qualidade','Retrabalho','Operacional','Outro'])
