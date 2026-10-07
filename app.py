@@ -445,7 +445,13 @@ elif pagina=='👁️ Visão Atual':
                     st.caption(f"Responsável: {r['responsavel']} • Absenteísmo: {r['absenteismo']:.1f}%")
                     if r['pendencias_proximo_turno']: st.warning(r['pendencias_proximo_turno'])
                 else:
-                    c1,c2,c3,c4=st.columns(4); c1.metric('Responsável',r['responsavel']); c2.metric('Absenteísmo',f"{r['absenteismo']:.1f}%"); c3.metric('Cargas',f"{r['cargas_realizadas']:g}"); c4.metric('Toneladas',f"{r['toneladas_realizadas'] or r['toneladas_estoque']:.2f}")
+                    cargas_visao = r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas']
+                    ton_visao = em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else em_toneladas(r['toneladas_estoque'])
+                    c1,c2,c3,c4=st.columns(4)
+                    c1.metric('Responsável',r['responsavel'])
+                    c2.metric('Absenteísmo',f"{r['absenteismo']:.1f}%")
+                    c3.metric('Cargas',f"{cargas_visao:g}")
+                    c4.metric('Toneladas',f"{ton_visao:.1f} t")
                 if r['observacoes']: st.write(r['observacoes'])
 
 elif pagina=='📊 Semana':
@@ -455,10 +461,15 @@ elif pagina=='📊 Semana':
     df=query('SELECT * FROM passagens WHERE data BETWEEN ? AND ? ORDER BY data',(str(di),str(dfim)))
     if df.empty: st.info('Sem registros no período.')
     else:
-        c1,c2,c3,c4=st.columns(4); c1.metric('Passagens',len(df)); c2.metric('Cargas',f"{df.cargas_realizadas.sum():g}"); c3.metric('Toneladas',f"{(df.toneladas_realizadas.sum()+df.toneladas_estoque.sum()):.1f} t"); c4.metric('Absenteísmo médio',f"{df.absenteismo.mean():.1f}%")
-        chart=df.groupby('data',as_index=False).agg(Cargas=('cargas_realizadas','sum'),Toneladas=('toneladas_realizadas','sum'))
+        df=df.copy()
+        df['Toneladas_exibicao']=df.apply(lambda r: em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else em_toneladas(r['toneladas_estoque']),axis=1)
+        df['Cargas_exibicao']=df.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
+        c1,c2,c3,c4=st.columns(4)
+        c1.metric('Passagens',len(df)); c2.metric('Cargas',f"{df.Cargas_exibicao.sum():g}"); c3.metric('Toneladas',f"{df.Toneladas_exibicao.sum():.1f} t"); c4.metric('Absenteísmo médio',f"{df.absenteismo.mean():.1f}%")
+        chart=df.groupby('data',as_index=False).agg(Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'))
         st.markdown('#### Evolução diária'); st.line_chart(chart.set_index('data'))
-        st.markdown('#### Por operação'); st.dataframe(df.groupby('operacao',as_index=False).agg(Passagens=('id','count'),Cargas=('cargas_realizadas','sum'),Toneladas=('toneladas_realizadas','sum'),Absenteismo_medio=('absenteismo','mean')),use_container_width=True,hide_index=True)
+        por_op=df.groupby('operacao',as_index=False).agg(Passagens=('id','count'),Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'),Absenteismo_medio=('absenteismo','mean'))
+        st.markdown('#### Por operação'); st.dataframe(por_op,use_container_width=True,hide_index=True)
         est=df[df.operacao=='Estoque'].copy()
         if not est.empty:
             st.markdown('#### 📦 Estoque — Produção × Picking por turno')
@@ -474,8 +485,11 @@ elif pagina=='🕘 Histórico':
     df=query('SELECT id,data,turno,operacao,responsavel,status,cargas_realizadas,toneladas_realizadas,veiculos_carregados,veiculos_pendentes,absenteismo,ofensor,observacoes,criado_em FROM passagens ORDER BY id DESC')
     if df.empty: st.info('Sem registros.')
     else:
-        st.dataframe(df,use_container_width=True,hide_index=True)
-        st.download_button('⬇️ Exportar CSV',df.to_csv(index=False).encode('utf-8-sig'),'historico_passagem.csv','text/csv')
+        df_exibir=df.copy()
+        df_exibir['toneladas_realizadas']=df_exibir['toneladas_realizadas'].apply(em_toneladas)
+        df_exibir['cargas_realizadas']=df_exibir.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
+        st.dataframe(df_exibir,use_container_width=True,hide_index=True)
+        st.download_button('⬇️ Exportar CSV',df_exibir.to_csv(index=False).encode('utf-8-sig'),'historico_passagem.csv','text/csv')
         with st.expander('🗑️ Excluir registro'):
             rid=st.number_input('ID do registro',min_value=1,step=1); conf=st.checkbox('Confirmo a exclusão')
             if st.button('Excluir') and conf:
@@ -490,8 +504,8 @@ else:
         st.markdown(f'## PASSAGEM DE TURNO — {d.strftime("%d/%m/%Y")} — {t}')
         resumo=[]
         for _,r in df.iterrows():
-            realizado = r['toneladas_realizadas'] if r['operacao']=='CDA 01 - Separação' else (r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else (r['cargas_realizadas'] if r['operacao']=='CDA 02' else r['toneladas_estoque']))
-            plan = r['planejado_ton'] if r['operacao'] in ['CDA 01 - Separação','Estoque'] else (r['planejado_veiculos'] if r['operacao']=='CDA 01 - Carregamento' else r['planejado_cargas'])
+            realizado = em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else (r['cargas_realizadas'] if r['operacao']=='CDA 02' else em_toneladas(r['toneladas_estoque']))
+            plan = r['planejado_ton'] if r['operacao']=='CDA 01 - Separação' else (r['planejado_cargas'] if r['operacao']=='CDA 02' else 0)
             resumo.append({'Operação':r['operacao'],'Planejado':plan,'Realizado':realizado,'Gap':realizado-plan if plan else None,'Atingimento %':pct(realizado,plan) if plan else None,'Status':r['status'],'Responsável':r['responsavel']})
         st.dataframe(pd.DataFrame(resumo),use_container_width=True,hide_index=True)
         st.markdown('### Pontos de atenção')
