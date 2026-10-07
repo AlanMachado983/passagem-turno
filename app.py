@@ -165,11 +165,8 @@ elif pagina=='📝 Nova Passagem':
     h1,h2=st.columns(2); hc=int(h1.number_input('Headcount do turno',min_value=0,step=1)); aus=int(h2.number_input('Ausências',min_value=0,step=1))
     presentes=max(hc-aus,0); abs_pct=(aus/hc*100) if hc else 0
     m1,m2,m3=st.columns(3);m1.metric('Presentes',presentes);m2.metric('Equipe presente',f'{(100-abs_pct):.1f}%');m3.metric('Absenteísmo',f'{abs_pct:.1f}%')
+    # Passagem enxuta: não exige nomes/motivos individuais das ausências.
     aus_det=[]
-    if aus:
-        st.markdown('**Detalhe das ausências**')
-        for i in range(aus):
-            x,y=st.columns(2); nome=x.text_input(f'Nome {i+1}',key=f'an{i}'); mot=y.selectbox(f'Motivo {i+1}',['Atestado','Falta','Afastado','Férias','Folga compensatória','Declaração médica','Outro'],key=f'am{i}'); aus_det.append((nome,mot))
 
     cargas=ton=vt=vc=vp=uz=pd_e=trans=ton_est=pal_est=0.0
     receb_kg=receb_pal=abast_kg=abast_pal=0.0
