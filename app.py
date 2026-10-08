@@ -1,12 +1,42 @@
 import os
-import sqlite3
 from datetime import datetime, date, timedelta
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title='Passagem de Turno | ADIMAX', page_icon='📦', layout='wide')
 
-DB='passagem_turno.db'
+# Banco persistente PostgreSQL configurado nos Secrets do Streamlit.
+# Não inclua senhas neste arquivo ou no GitHub.
+import psycopg2
+
+class PgCursor:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.lastrowid = None
+    def execute(self, sql, params=()):
+        sql = sql.replace('?', '%s')
+        if sql.lstrip().upper().startswith('INSERT INTO PASSAGENS') and 'RETURNING' not in sql.upper():
+            sql += ' RETURNING id'
+            self._cursor.execute(sql, params)
+            self.lastrowid = self._cursor.fetchone()[0]
+        else:
+            self._cursor.execute(sql, params)
+        return self
+    def fetchone(self): return self._cursor.fetchone()
+    def fetchall(self): return self._cursor.fetchall()
+    @property
+    def description(self): return self._cursor.description
+
+class PgConnection:
+    def __init__(self):
+        s=st.secrets['connections']['postgresql']
+        self._conn=psycopg2.connect(host=s['host'],port=int(s['port']),dbname=s['database'],user=s['username'],password=s['password'],sslmode='require',connect_timeout=12)
+    def cursor(self): return PgCursor(self._conn.cursor())
+    def commit(self): self._conn.commit()
+    def rollback(self): self._conn.rollback()
+    def close(self): self._conn.close()
+
+def conn(): return PgConnection()
 
 def nome_turno(turno):
     return {'T1':'1º Turno','T2':'2º Turno','T3':'3º Turno'}.get(str(turno),str(turno))
@@ -20,156 +50,21 @@ def em_toneladas(valor):
         return 0.0
 
 
-def conn():
-    return sqlite3.connect(DB, check_same_thread=False)
-
-def init_db():
-    c=conn(); cur=c.cursor()
-    cur.execute('''CREATE TABLE IF NOT EXISTS planejamento (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, turno TEXT, operacao TEXT,
-        indicador TEXT, planejado REAL, atualizado_em TEXT)''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS passagens (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT,
-        area TEXT, operacao TEXT, responsavel TEXT,
-        headcount INTEGER DEFAULT 0, ausencias INTEGER DEFAULT 0, presentes INTEGER DEFAULT 0,
-        absenteismo REAL DEFAULT 0,
-        cargas_realizadas REAL DEFAULT 0, toneladas_realizadas REAL DEFAULT 0,
-        veiculos_trabalhados REAL DEFAULT 0, veiculos_carregados REAL DEFAULT 0,
-        veiculos_pendentes REAL DEFAULT 0, uz_paletes REAL DEFAULT 0, pd_espera REAL DEFAULT 0,
-        transbordo_total REAL DEFAULT 0, toneladas_estoque REAL DEFAULT 0, paletes_estoque REAL DEFAULT 0,
-        planejado_cargas REAL DEFAULT 0, planejado_ton REAL DEFAULT 0, planejado_veiculos REAL DEFAULT 0,
-        gap_cargas REAL DEFAULT 0, gap_ton REAL DEFAULT 0, gap_veiculos REAL DEFAULT 0,
-        ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
-        ofensor TEXT, observacoes TEXT, status TEXT)''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS pendencias (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, passagem_id INTEGER, carga TEXT, cliente TEXT,
-        situacao TEXT, motivo TEXT, detalhe TEXT)''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS ausencias_detalhe (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, passagem_id INTEGER, nome TEXT, motivo TEXT)''')
-    # Migração automática: mantém bancos de versões anteriores compatíveis
-    def ensure_columns(table, columns):
-        cur.execute(f"PRAGMA table_info({table})")
-        existing = {row[1] for row in cur.fetchall()}
-        for name, definition in columns.items():
-            if name not in existing:
-                cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
-
-    # Corrige banco legado com colunas antigas obrigatórias (NOT NULL).
-    cur.execute("PRAGMA table_info(passagens)")
-    legacy_required = [r[1] for r in cur.fetchall()
-                       if r[3] == 1 and r[4] is None and r[1] != 'id']
-    v4_cols = {
-        'criado_em','data','turno','area','operacao','responsavel','headcount','ausencias','presentes',
-        'absenteismo','cargas_realizadas','toneladas_realizadas','veiculos_trabalhados','veiculos_carregados',
-        'veiculos_pendentes','uz_paletes','pd_espera','transbordo_total','toneladas_estoque','paletes_estoque',
-        'planejado_cargas','planejado_ton','planejado_veiculos','gap_cargas','gap_ton','gap_veiculos',
-        'ating_cargas','ating_ton','ating_veiculos','ofensor','observacoes','status'
-    }
-    incompatible = [c for c in legacy_required if c not in v4_cols]
-    if incompatible:
-        cur.execute("DROP TABLE IF EXISTS passagens_legado_backup")
-        cur.execute("ALTER TABLE passagens RENAME TO passagens_legado_backup")
-        cur.execute('''CREATE TABLE passagens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT,
-            area TEXT, operacao TEXT, responsavel TEXT,
-            headcount INTEGER DEFAULT 0, ausencias INTEGER DEFAULT 0, presentes INTEGER DEFAULT 0,
-            absenteismo REAL DEFAULT 0,
-            cargas_realizadas REAL DEFAULT 0, toneladas_realizadas REAL DEFAULT 0,
-            veiculos_trabalhados REAL DEFAULT 0, veiculos_carregados REAL DEFAULT 0,
-            veiculos_pendentes REAL DEFAULT 0, uz_paletes REAL DEFAULT 0, pd_espera REAL DEFAULT 0,
-            transbordo_total REAL DEFAULT 0, toneladas_estoque REAL DEFAULT 0, paletes_estoque REAL DEFAULT 0,
-            planejado_cargas REAL DEFAULT 0, planejado_ton REAL DEFAULT 0, planejado_veiculos REAL DEFAULT 0,
-            gap_cargas REAL DEFAULT 0, gap_ton REAL DEFAULT 0, gap_veiculos REAL DEFAULT 0,
-            ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
-            ofensor TEXT, observacoes TEXT, status TEXT)''')
-
-    # Remove a restrição legada UNIQUE(data, turno, area).
-    # CDA 01 precisa aceitar Separação e Carregamento na mesma data/turno/área.
-    cur.execute("PRAGMA index_list(passagens)")
-    unique_indexes = [r for r in cur.fetchall() if r[2] == 1]
-    legacy_unique = False
-    for idx in unique_indexes:
-        idx_name = idx[1]
-        safe_idx = idx_name.replace("'", "''")
-        cur.execute(f"PRAGMA index_info('{safe_idx}')")
-        idx_cols = [r[2] for r in cur.fetchall()]
-        if set(idx_cols) == {'data','turno','area'} and len(idx_cols) == 3:
-            legacy_unique = True
-            break
-
-    if legacy_unique:
-        cur.execute("DROP TABLE IF EXISTS passagens_sem_unique_backup")
-        cur.execute("ALTER TABLE passagens RENAME TO passagens_sem_unique_backup")
-        cur.execute('''CREATE TABLE passagens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT,
-            area TEXT, operacao TEXT, responsavel TEXT,
-            headcount INTEGER DEFAULT 0, ausencias INTEGER DEFAULT 0, presentes INTEGER DEFAULT 0,
-            absenteismo REAL DEFAULT 0,
-            cargas_realizadas REAL DEFAULT 0, toneladas_realizadas REAL DEFAULT 0,
-            veiculos_trabalhados REAL DEFAULT 0, veiculos_carregados REAL DEFAULT 0,
-            veiculos_pendentes REAL DEFAULT 0, uz_paletes REAL DEFAULT 0, pd_espera REAL DEFAULT 0,
-            transbordo_total REAL DEFAULT 0, toneladas_estoque REAL DEFAULT 0, paletes_estoque REAL DEFAULT 0,
-            planejado_cargas REAL DEFAULT 0, planejado_ton REAL DEFAULT 0, planejado_veiculos REAL DEFAULT 0,
-            gap_cargas REAL DEFAULT 0, gap_ton REAL DEFAULT 0, gap_veiculos REAL DEFAULT 0,
-            ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
-            ofensor TEXT, observacoes TEXT, status TEXT,
-            recebimento_producao_kg REAL DEFAULT 0, recebimento_producao_paletes REAL DEFAULT 0,
-            abastecimento_picking_kg REAL DEFAULT 0, abastecimento_picking_paletes REAL DEFAULT 0,
-            carretas_descarregadas INTEGER DEFAULT 0, carretas_armazenadas INTEGER DEFAULT 0,
-            carretas_aguardando INTEGER DEFAULT 0, transbordos_cda02 INTEGER DEFAULT 0,
-            reembalo_enviados INTEGER DEFAULT 0, reprocesso_enviados INTEGER DEFAULT 0,
-            maquinas_paradas INTEGER DEFAULT 0, equipamento_parado TEXT,
-            problema_equipamento TEXT, pendencias_proximo_turno TEXT,
-                    varejo_cargas REAL DEFAULT 0, varejo_ton REAL DEFAULT 0,
-                    transferencias_qtd REAL DEFAULT 0, transferencias_ton REAL DEFAULT 0)''')
-
-        # Preserva os registros antigos nas colunas que existirem nos dois schemas.
-        old_cols = [r[1] for r in cur.execute("PRAGMA table_info(passagens_sem_unique_backup)").fetchall()]
-        new_cols = [r[1] for r in cur.execute("PRAGMA table_info(passagens)").fetchall()]
-        common = [cname for cname in old_cols if cname in new_cols]
-        if common:
-            cols_sql = ",".join(f'"{cname}"' for cname in common)
-            cur.execute(f'INSERT OR IGNORE INTO passagens ({cols_sql}) SELECT {cols_sql} FROM passagens_sem_unique_backup')
-        c.commit()
-
-    ensure_columns('passagens', {
-        'criado_em': 'TEXT', 'data': 'TEXT', 'turno': 'TEXT', 'area': 'TEXT',
-        'operacao': 'TEXT', 'responsavel': 'TEXT',
-        'headcount': 'INTEGER DEFAULT 0', 'ausencias': 'INTEGER DEFAULT 0',
-        'presentes': 'INTEGER DEFAULT 0', 'absenteismo': 'REAL DEFAULT 0',
-        'cargas_realizadas': 'REAL DEFAULT 0', 'toneladas_realizadas': 'REAL DEFAULT 0',
-        'veiculos_trabalhados': 'REAL DEFAULT 0', 'veiculos_carregados': 'REAL DEFAULT 0',
-        'veiculos_pendentes': 'REAL DEFAULT 0', 'uz_paletes': 'REAL DEFAULT 0',
-        'pd_espera': 'REAL DEFAULT 0', 'transbordo_total': 'REAL DEFAULT 0',
-        'toneladas_estoque': 'REAL DEFAULT 0', 'paletes_estoque': 'REAL DEFAULT 0',
-        'planejado_cargas': 'REAL DEFAULT 0', 'planejado_ton': 'REAL DEFAULT 0',
-        'planejado_veiculos': 'REAL DEFAULT 0', 'gap_cargas': 'REAL DEFAULT 0',
-        'gap_ton': 'REAL DEFAULT 0', 'gap_veiculos': 'REAL DEFAULT 0',
-        'ating_cargas': 'REAL DEFAULT 0', 'ating_ton': 'REAL DEFAULT 0',
-        'ating_veiculos': 'REAL DEFAULT 0', 'ofensor': 'TEXT',
-        'observacoes': 'TEXT', 'status': 'TEXT',
-        'recebimento_producao_kg': 'REAL DEFAULT 0',
-        'recebimento_producao_paletes': 'REAL DEFAULT 0',
-        'abastecimento_picking_kg': 'REAL DEFAULT 0',
-        'abastecimento_picking_paletes': 'REAL DEFAULT 0',
-        'carretas_descarregadas': 'INTEGER DEFAULT 0',
-        'carretas_armazenadas': 'INTEGER DEFAULT 0',
-        'carretas_aguardando': 'INTEGER DEFAULT 0',
-        'transbordos_cda02': 'INTEGER DEFAULT 0',
-        'reembalo_enviados': 'INTEGER DEFAULT 0',
-        'reprocesso_enviados': 'INTEGER DEFAULT 0',
-        'maquinas_paradas': 'INTEGER DEFAULT 0',
-        'equipamento_parado': 'TEXT',
-        'problema_equipamento': 'TEXT',
-        'pendencias_proximo_turno': 'TEXT',
-        'varejo_cargas': 'REAL DEFAULT 0', 'varejo_ton': 'REAL DEFAULT 0',
-        'transferencias_qtd': 'REAL DEFAULT 0', 'transferencias_ton': 'REAL DEFAULT 0'
-    })
-    c.commit(); c.close()
-init_db()
-
 def query(sql, params=()):
-    c=conn(); df=pd.read_sql_query(sql,c,params=params); c.close(); return df
+    c=conn()
+    try:
+        cur=c.cursor()
+        cur.execute(sql,params)
+        rows=cur.fetchall()
+        cols=[d[0] for d in cur.description]
+        df=pd.DataFrame(rows,columns=cols)
+        from decimal import Decimal
+        for col in df.columns:
+            if any(isinstance(v,Decimal) for v in df[col].head(10)):
+                df[col]=pd.to_numeric(df[col],errors='coerce').fillna(0)
+        return df
+    finally:
+        c.close()
 
 def normalizar_pesos_df(df):
     if df is not None and not df.empty and 'toneladas_realizadas' in df.columns:
@@ -209,11 +104,11 @@ if pagina=='📋 Planejamento':
     if st.button('💾 Salvar / atualizar planejamento diário',type='primary'):
         valor_salvar=valor/1000.0 if valor>=10000 else valor
         c=conn(); cur=c.cursor(); agora=datetime.now().isoformat(timespec='seconds')
-        existente=cur.execute("SELECT id FROM planejamento WHERE data=? AND turno='DIA' AND operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY id DESC LIMIT 1",(str(d),)).fetchone()
-        if existente:
-            cur.execute('UPDATE planejamento SET planejado=?, atualizado_em=? WHERE id=?',(valor_salvar,agora,existente[0]))
-        else:
-            cur.execute("INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em) VALUES(?,'DIA','CDA 01 - Separação','Toneladas',?,?)",(str(d),valor_salvar,agora))
+        cur.execute("""INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em)
+            VALUES(?,'DIA','CDA 01 - Separação','Toneladas',?)
+            ON CONFLICT (data,operacao,indicador)
+            DO UPDATE SET planejado=EXCLUDED.planejado, atualizado_em=EXCLUDED.atualizado_em""",
+            (str(d),valor_salvar,agora))
         c.commit(); c.close(); st.success('Planejamento diário salvo.'); st.rerun()
     df=query("SELECT id,data,planejado,atualizado_em FROM planejamento WHERE turno='DIA' AND operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY data DESC,id DESC LIMIT 50")
     if not df.empty:
@@ -414,36 +309,6 @@ elif pagina=='📝 Nova Passagem':
         elif aus>hc and hc>0: st.error('Ausências não pode ser maior que o headcount.')
         else:
             c=conn();cur=c.cursor()
-            # Defesa contra schema legado: recria a tabela passagens em formato limpo se houver
-            # qualquer coluna NOT NULL sem default além do id. Isso elimina IntegrityError de versões antigas.
-            info=cur.execute("PRAGMA table_info(passagens)").fetchall()
-            obrigatorias=[r for r in info if r[3]==1 and r[4] is None and r[1] != 'id']
-            if obrigatorias:
-                cur.execute("DROP TABLE IF EXISTS passagens_legado_backup")
-                cur.execute("ALTER TABLE passagens RENAME TO passagens_legado_backup")
-                cur.execute('''CREATE TABLE passagens (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, criado_em TEXT, data TEXT, turno TEXT,
-                    area TEXT, operacao TEXT, responsavel TEXT,
-                    headcount INTEGER DEFAULT 0, ausencias INTEGER DEFAULT 0, presentes INTEGER DEFAULT 0,
-                    absenteismo REAL DEFAULT 0,
-                    cargas_realizadas REAL DEFAULT 0, toneladas_realizadas REAL DEFAULT 0,
-                    veiculos_trabalhados REAL DEFAULT 0, veiculos_carregados REAL DEFAULT 0,
-                    veiculos_pendentes REAL DEFAULT 0, uz_paletes REAL DEFAULT 0, pd_espera REAL DEFAULT 0,
-                    transbordo_total REAL DEFAULT 0, toneladas_estoque REAL DEFAULT 0, paletes_estoque REAL DEFAULT 0,
-                    planejado_cargas REAL DEFAULT 0, planejado_ton REAL DEFAULT 0, planejado_veiculos REAL DEFAULT 0,
-                    gap_cargas REAL DEFAULT 0, gap_ton REAL DEFAULT 0, gap_veiculos REAL DEFAULT 0,
-                    ating_cargas REAL DEFAULT 0, ating_ton REAL DEFAULT 0, ating_veiculos REAL DEFAULT 0,
-                    ofensor TEXT, observacoes TEXT, status TEXT,
-                    recebimento_producao_kg REAL DEFAULT 0, recebimento_producao_paletes REAL DEFAULT 0,
-                    abastecimento_picking_kg REAL DEFAULT 0, abastecimento_picking_paletes REAL DEFAULT 0,
-                    carretas_descarregadas INTEGER DEFAULT 0, carretas_armazenadas INTEGER DEFAULT 0,
-                    carretas_aguardando INTEGER DEFAULT 0, transbordos_cda02 INTEGER DEFAULT 0,
-                    reembalo_enviados INTEGER DEFAULT 0, reprocesso_enviados INTEGER DEFAULT 0,
-                    maquinas_paradas INTEGER DEFAULT 0, equipamento_parado TEXT,
-                    problema_equipamento TEXT, pendencias_proximo_turno TEXT,
-                    varejo_cargas REAL DEFAULT 0, varejo_ton REAL DEFAULT 0,
-                    transferencias_qtd REAL DEFAULT 0, transferencias_ton REAL DEFAULT 0)''')
-                c.commit()
             cur.execute('''INSERT INTO passagens(
             criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
             cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
@@ -551,4 +416,4 @@ else:
             if r['observacoes']: st.write(r['observacoes'])
         st.info('Use a opção de impressão do navegador para imprimir ou salvar esta visão em PDF. Na próxima etapa podemos gerar um PDF A4 formatado diretamente pelo app.')
 
-st.caption('Protótipo V4 • Banco SQLite para validação. Para produção/múltiplos usuários, conectar a um banco persistente online.')
+st.caption('Passagem de Turno ADIMAX • Dados armazenados no PostgreSQL (Supabase).')
