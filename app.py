@@ -121,9 +121,7 @@ if pagina=='📋 Planejamento':
     st.markdown('#### 📦 Separação')
     sep_plan=st.number_input('Toneladas planejadas de Separação',min_value=0.0,step=1.0,format='%.1f',value=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas'),key=f'sep_{d}')
     st.markdown('#### 🚛 Carregamento')
-    x,y=st.columns(2)
-    car_qtd=x.number_input('Veículos / cargas planejados',min_value=0,step=1,value=int(scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')),key=f'car_qtd_{d}')
-    car_ton=y.number_input('Toneladas planejadas de Carregamento',min_value=0.0,step=1.0,format='%.1f',value=scalar_plan(d,'DIA','CDA 01 - Carregamento','Toneladas'),key=f'car_ton_{d}')
+    car_qtd=st.number_input('Veículos / cargas planejados',min_value=0,step=1,value=int(scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')),key=f'car_qtd_{d}')
     if st.button('💾 Salvar / atualizar planejamento diário',type='primary'):
         c=conn()
         try:
@@ -132,7 +130,6 @@ if pagina=='📋 Planejamento':
             for op,indicador,valor in [
                 ('CDA 01 - Separação','Toneladas',sep_plan),
                 ('CDA 01 - Carregamento','Veículos',car_qtd),
-                ('CDA 01 - Carregamento','Toneladas',car_ton),
             ]:
                 cur.execute("""INSERT INTO planejamento(data,operacao,indicador,planejado,atualizado_em)
                     VALUES(?,?,?,?,?)
@@ -149,7 +146,8 @@ if pagina=='📋 Planejamento':
             c.close()
     df=query("""SELECT data,operacao,indicador,planejado,atualizado_em
                 FROM planejamento
-                WHERE operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento')
+                WHERE (operacao='CDA 01 - Separação' AND indicador='Toneladas')
+                   OR (operacao='CDA 01 - Carregamento' AND indicador='Veículos')
                 ORDER BY data DESC,atualizado_em DESC LIMIT 150""")
     if not df.empty:
         st.markdown('#### Planejamentos registrados')
@@ -163,7 +161,6 @@ elif pagina=='🎯 Planejado do Dia':
     d=st.date_input('Data do painel',date.today(),key='data_painel_dia')
     plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
     plan_car_qtd=scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')
-    plan_car_ton=scalar_plan(d,'DIA','CDA 01 - Carregamento','Toneladas')
     if plan_sep>=10000: plan_sep=plan_sep/1000.0
     dados=query("SELECT * FROM passagens WHERE data=? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d),))
     if not dados.empty:
@@ -229,14 +226,11 @@ elif pagina=='🎯 Planejado do Dia':
         if not sep.empty and not sep[sep.turno==t].empty: v=em_toneladas(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
         col.metric(nome_turno(t),f'{v:.1f} t')
     st.markdown('---'); st.markdown('### 🚛 Carregamento')
-    c1,c2,c3,c4=st.columns(4)
+    c1,c2,c3=st.columns(3)
     c1.metric('Veículos planejados',f'{plan_car_qtd:g}')
     c2.metric('Veículos carregados',f'{cargas_car:g}',f'{cargas_car-plan_car_qtd:+g} vs meta' if plan_car_qtd else None)
-    c3.metric('Toneladas planejadas',f'{plan_car_ton:.1f} t')
-    c4.metric('Toneladas carregadas',f'{ton_car:.1f} t',f'{ton_car-plan_car_ton:+.1f} t vs meta' if plan_car_ton else None)
-    a,b=st.columns(2)
-    a.metric('Atingimento veículos',f'{pct(cargas_car,plan_car_qtd):.1f}%' if plan_car_qtd else '—')
-    b.metric('Atingimento toneladas',f'{pct(ton_car,plan_car_ton):.1f}%' if plan_car_ton else '—')
+    c3.metric('Toneladas carregadas (informativo)',f'{ton_car:.1f} t')
+    st.metric('Atingimento veículos',f'{pct(cargas_car,plan_car_qtd):.1f}%' if plan_car_qtd else '—')
     st.markdown('#### Realizado por turno — Carregamento')
     cols=st.columns(3)
     for col,t in zip(cols,['T1','T2','T3']):
