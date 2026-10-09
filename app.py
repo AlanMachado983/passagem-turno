@@ -129,7 +129,7 @@ st.markdown('<div class="hero"><h1>Passagem de Turno</h1><p>Logística • CDA 0
 with st.sidebar:
     st.markdown('## ADIMAX')
     if os.path.exists('assets/caminhoes.png'): st.image('assets/caminhoes.png',use_container_width=True)
-    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
+    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','👔 Visão do Supervisor','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
 
 if pagina=='📋 Planejamento':
     st.header('📋 Planejamento diário')
@@ -459,6 +459,69 @@ elif pagina=='👁️ Visão Atual':
                     c3.metric('Cargas',f"{cargas_visao:g}")
                     c4.metric('Toneladas',f"{ton_visao:.1f} t")
                 if r['observacoes']: st.write(r['observacoes'])
+
+elif pagina=='👔 Visão do Supervisor':
+    st.header('👔 Visão do Supervisor')
+    st.caption('Acompanhe somente as informações da sua operação. A seleção do nome é um filtro de visualização, não uma autenticação.')
+    supervisores={
+        'ANDRE FORTUNATO':'CDA 01 - Separação',
+        'MARCIO HENRIQUE SCHAFFER':'CDA 01 - Carregamento',
+        'FRANCISCO FERREIRA CARNEIRO JUNIOR':'CDA 02',
+        'WAGNER LUIZ GALONE SANCHES FILHO':'Estoque',
+    }
+    supervisor=st.selectbox('Selecione o supervisor',list(supervisores),index=None,placeholder='Escolha seu nome')
+    if not supervisor:
+        st.info('Selecione seu nome para visualizar os indicadores da área.')
+        st.stop()
+    op=supervisores[supervisor]
+    st.info('Área sob responsabilidade: '+op)
+    hoje=date.today()
+    ini=hoje-timedelta(days=6)
+    c1,c2=st.columns(2)
+    di=c1.date_input('Data inicial',ini,key='sup_ini')
+    dfim=c2.date_input('Data final',hoje,key='sup_fim')
+    if di>dfim:
+        st.warning('A data inicial deve ser anterior ou igual à data final.')
+        st.stop()
+    dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di),str(dfim)))
+    if dados.empty:
+        st.info('Não há passagens registradas para esta área no período selecionado.')
+    else:
+        # Uma versão por data/turno, evitando somar reenvios da mesma passagem.
+        dados=dados.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
+        dados['Volume_t']=dados['toneladas_realizadas'].apply(em_toneladas) if op!='Estoque' else dados['toneladas_estoque'].apply(em_toneladas)
+        dados['Movimentos']=dados['veiculos_carregados'] if op=='CDA 01 - Carregamento' else dados['cargas_realizadas']
+        total_hc=float(dados['headcount'].sum())
+        total_aus=float(dados['ausencias'].sum())
+        a,b,c,d=st.columns(4)
+        a.metric('Passagens registradas',len(dados))
+        if op=='Estoque':
+            b.metric('Paletes recebidos',f"{dados['recebimento_producao_paletes'].sum():g}")
+            c.metric('Paletes abastecidos',f"{dados['abastecimento_picking_paletes'].sum():g}")
+        else:
+            b.metric('Veículos carregados' if op=='CDA 01 - Carregamento' else 'Cargas',f"{dados['Movimentos'].sum():g}")
+            c.metric('Toneladas',f"{dados['Volume_t'].sum():.1f} t")
+        d.metric('Absenteísmo',f'{total_aus/total_hc*100:.1f}%' if total_hc else '—')
+        st.markdown('#### Evolução da área')
+        if op=='Estoque':
+            evol=dados.groupby('data',as_index=True)[['recebimento_producao_paletes','abastecimento_picking_paletes']].sum()
+            st.line_chart(evol)
+        else:
+            evol=dados.groupby('data',as_index=True)[['Volume_t','Movimentos']].sum()
+            st.line_chart(evol)
+        st.markdown('#### Resultado por turno')
+        por_turno=dados.groupby('turno',as_index=False).agg(Passagens=('id','count'),Movimentos=('Movimentos','sum'),Toneladas=('Volume_t','sum'),Ausencias=('ausencias','sum'),Headcount=('headcount','sum'))
+        por_turno['Turno']=por_turno['turno'].apply(nome_turno)
+        por_turno['Absenteísmo (%)']=por_turno.apply(lambda r: round(r['Ausencias']/r['Headcount']*100,1) if r['Headcount'] else 0,axis=1)
+        st.dataframe(por_turno[['Turno','Passagens','Movimentos','Toneladas','Absenteísmo (%)']],hide_index=True,use_container_width=True)
+        st.markdown('#### Ofensores e observações')
+        ocorrencias=dados[(dados['ofensor'].fillna('Sem ofensor')!='Sem ofensor') | (dados['observacoes'].fillna('').str.strip()!='')].copy()
+        if ocorrencias.empty:
+            st.success('Nenhum ofensor ou observação registrado no período.')
+        else:
+            st.dataframe(ocorrencias[['data','turno','responsavel','status','ofensor','observacoes']].rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','status':'Status','ofensor':'Ofensor','observacoes':'Observações'}),hide_index=True,use_container_width=True)
+        st.markdown('#### Últimas passagens')
+        st.dataframe(dados.sort_values('id',ascending=False)[['data','turno','responsavel','status','absenteismo']].rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','status':'Status','absenteismo':'Absenteísmo (%)'}),hide_index=True,use_container_width=True)
 
 elif pagina=='📊 Semana':
     st.header('📊 Resumo semanal')
