@@ -73,7 +73,7 @@ def normalizar_pesos_df(df):
     return df
 
 def scalar_plan(d,t,o,i):
-    df=query('SELECT planejado FROM planejamento WHERE data=? AND turno=? AND operacao=? AND indicador=? ORDER BY id DESC LIMIT 1',(str(d),t,o,i))
+    df=query('SELECT planejado FROM planejamento WHERE data=? AND operacao=? AND indicador=? ORDER BY id DESC LIMIT 1',(str(d),o,i))
     return float(df.iloc[0,0]) if not df.empty else 0.0
 
 def pct(real, plan): return (real/plan*100) if plan else 0.0
@@ -104,13 +104,13 @@ if pagina=='📋 Planejamento':
     if st.button('💾 Salvar / atualizar planejamento diário',type='primary'):
         valor_salvar=valor/1000.0 if valor>=10000 else valor
         c=conn(); cur=c.cursor(); agora=datetime.now().isoformat(timespec='seconds')
-        cur.execute("""INSERT INTO planejamento(data,turno,operacao,indicador,planejado,atualizado_em)
-            VALUES(?,'DIA','CDA 01 - Separação','Toneladas',?)
+        cur.execute("""INSERT INTO planejamento(data,operacao,indicador,planejado,atualizado_em)
+            VALUES(?,'CDA 01 - Separação','Toneladas',?,?)
             ON CONFLICT (data,operacao,indicador)
             DO UPDATE SET planejado=EXCLUDED.planejado, atualizado_em=EXCLUDED.atualizado_em""",
             (str(d),valor_salvar,agora))
         c.commit(); c.close(); st.success('Planejamento diário salvo.'); st.rerun()
-    df=query("SELECT id,data,planejado,atualizado_em FROM planejamento WHERE turno='DIA' AND operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY data DESC,id DESC LIMIT 50")
+    df=query("SELECT id,data,planejado,atualizado_em FROM planejamento WHERE operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY data DESC,id DESC LIMIT 50")
     if not df.empty:
         ex=df.rename(columns={'data':'Data','planejado':'Planejado Separação (t)','atualizado_em':'Atualizado em'})
         st.dataframe(ex.drop(columns=['id']),width='stretch',hide_index=True)
@@ -324,9 +324,7 @@ elif pagina=='📝 Nova Passagem':
              cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
              receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
              equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton)); pid=cur.lastrowid
-            for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,detalhe) VALUES(?,?,?,?,?,?)',(pid,*r))
-            for n,m in aus_det:
-                if n.strip(): cur.execute('INSERT INTO ausencias_detalhe(passagem_id,nome,motivo) VALUES(?,?,?)',(pid,n,m))
+            for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
             c.commit();c.close();st.success('Passagem salva com sucesso.')
 
 elif pagina=='👁️ Visão Atual':
@@ -336,7 +334,7 @@ elif pagina=='👁️ Visão Atual':
     else:
         latest=df.groupby(['operacao','turno'],as_index=False).first()
         for _,r in latest.iterrows():
-            with st.expander(f"{r['operacao']} • {r['turno']} • {r['status']}",expanded=True):
+            with st.expander(f"{r['operacao']} • {nome_turno(r['turno'])} • {r['status']}",expanded=True):
                 if r['operacao']=='Estoque':
                     c1,c2,c3,c4=st.columns(4)
                     c1.metric('Recebimento Produção',f"{r['recebimento_producao_kg']:,.0f} kg".replace(',','.'))
@@ -362,15 +360,16 @@ elif pagina=='📊 Semana':
     df=query('SELECT * FROM passagens WHERE data BETWEEN ? AND ? ORDER BY data',(str(di),str(dfim)))
     if df.empty: st.info('Sem registros no período.')
     else:
-        df=df.copy()
+        df=df.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
         df['Toneladas_exibicao']=df.apply(lambda r: em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else em_toneladas(r['toneladas_estoque']),axis=1)
         df['Cargas_exibicao']=df.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
         c1,c2,c3,c4=st.columns(4)
-        c1.metric('Passagens',len(df)); c2.metric('Cargas',f"{df.Cargas_exibicao.sum():g}"); c3.metric('Toneladas',f"{df.Toneladas_exibicao.sum():.1f} t"); c4.metric('Absenteísmo médio',f"{df.absenteismo.mean():.1f}%")
-        chart=df.groupby('data',as_index=False).agg(Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'))
-        st.markdown('#### Evolução diária'); st.line_chart(chart.set_index('data'))
+        hc_total=float(df.headcount.sum()); aus_total=float(df.ausencias.sum())
+        c1.metric('Passagens',len(df)); c2.metric('Cargas',f"{df.Cargas_exibicao.sum():g}"); c3.metric('Toneladas por operação','Ver detalhamento'); c4.metric('Absenteísmo',f"{(aus_total/hc_total*100):.1f}%" if hc_total else '—')
+        chart=df.groupby(['data','operacao'],as_index=False).agg(Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'))
+        st.markdown('#### Evolução diária de toneladas por operação'); st.line_chart(chart.pivot(index='data',columns='operacao',values='Toneladas').fillna(0))
         por_op=df.groupby('operacao',as_index=False).agg(Passagens=('id','count'),Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'),Absenteismo_medio=('absenteismo','mean'))
-        st.markdown('#### Por operação'); st.dataframe(por_op,use_container_width=True,hide_index=True)
+        st.markdown('#### Por operação (sem somar Separação e Carregamento)'); st.dataframe(por_op,use_container_width=True,hide_index=True)
         est=df[df.operacao=='Estoque'].copy()
         if not est.empty:
             st.markdown('#### 📦 Estoque — Produção × Picking por turno')
@@ -395,7 +394,7 @@ elif pagina=='🕘 Histórico':
         with st.expander('🗑️ Excluir registro'):
             rid=st.number_input('ID do registro',min_value=1,step=1); conf=st.checkbox('Confirmo a exclusão')
             if st.button('Excluir') and conf:
-                c=conn();cur=c.cursor();cur.execute('DELETE FROM pendencias WHERE passagem_id=?',(rid,));cur.execute('DELETE FROM ausencias_detalhe WHERE passagem_id=?',(rid,));cur.execute('DELETE FROM passagens WHERE id=?',(rid,));c.commit();c.close();st.success('Registro excluído.');st.rerun()
+                c=conn();cur=c.cursor();cur.execute('DELETE FROM passagens WHERE id=?',(rid,));c.commit();c.close();st.success('Registro excluído.');st.rerun()
 
 else:
     st.header('🖨️ Passagem consolidada para impressão')
@@ -403,7 +402,8 @@ else:
     df=query('SELECT * FROM passagens WHERE data=? AND turno=? ORDER BY operacao',(str(d),t))
     if df.empty: st.info('Não há registros para esta data/turno.')
     else:
-        st.markdown(f'## PASSAGEM DE TURNO — {d.strftime("%d/%m/%Y")} — {t}')
+        df=df.sort_values('id').groupby(['operacao'],as_index=False).tail(1)
+        st.markdown(f'## PASSAGEM DE TURNO — {d.strftime("%d/%m/%Y")} — {nome_turno(t)}')
         resumo=[]
         for _,r in df.iterrows():
             realizado = em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else (r['cargas_realizadas'] if r['operacao']=='CDA 02' else em_toneladas(r['toneladas_estoque']))
