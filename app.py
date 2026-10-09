@@ -112,10 +112,12 @@ def scalar_plan(d,t,o,i):
 
 def pct(real, plan): return (real/plan*100) if plan else 0.0
 
-def status_auto(pend, atingimentos):
-    vals=[v for v in atingimentos if v>0]
-    if pend>=3 or (vals and min(vals)<80): return '🔴 Crítico'
-    if pend>0 or (vals and min(vals)<95): return '🟡 Atenção'
+def status_auto(pend, absenteismo, ofensor='Sem ofensor', ofensor_grave=False):
+    """Classifica riscos operacionais, sem penalizar metas diárias por turno."""
+    if absenteismo>=15 or ofensor_grave:
+        return '🔴 Crítico'
+    if absenteismo>=8 or pend>0 or ofensor!='Sem ofensor':
+        return '🟡 Atenção'
     return '🟢 Normal'
 
 st.markdown('''<style>
@@ -403,7 +405,9 @@ elif pagina=='📝 Nova Passagem':
     st.subheader('⚠️ Fechamento')
     of=st.selectbox('Principal ofensor',['Sem ofensor','Falta de produto/estoque','Mão de obra','Sistema/Integração','WMS/Körber','Atraso/ausência de veículo','Equipamento','Qualidade','Retrabalho','Operacional','Outro'])
     obs=st.text_area('Observações / pontos de atenção para o próximo turno')
-    stat=status_auto(len(pend),[ac,at,av]); st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
+    ofensor_grave=st.checkbox('🚨 Ofensor grave: comprometeu a operação',value=False,help='Marque somente em caso de ocorrência com impacto operacional grave, como paralisação ou bloqueio relevante.')
+    stat=status_auto(len(pend),abs_pct,of,ofensor_grave)
+    st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
     if st.button('💾 Salvar passagem',type='primary',use_container_width=True):
         if not resp.strip(): st.error('Informe o responsável pela passagem.')
         elif aus>hc: st.error('Ausências não pode ser maior que o headcount.')
