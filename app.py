@@ -438,7 +438,7 @@ elif pagina=='📝 Nova Passagem':
 
     st.subheader('⚠️ Fechamento')
     of=st.selectbox('Principal ofensor',['Sem ofensor','Falta de produto/estoque','Mão de obra','Sistema/Integração','WMS/Körber','Atraso/ausência de veículo','Equipamento','Qualidade','Retrabalho','Operacional','Outro'])
-    obs=st.text_area('Observações / pontos de atenção para o próximo turno')
+    obs=st.text_area('Observações / detalhes do ofensor / pontos de atenção para o próximo turno',height=220,placeholder='Descreva o que aconteceu, o impacto na operação, as ações tomadas e o que o próximo turno precisa acompanhar...')
     ofensor_grave=st.checkbox('🚨 Ofensor grave: comprometeu a operação',value=False,help='Marque somente em caso de ocorrência com impacto operacional grave, como paralisação ou bloqueio relevante.')
     stat=status_auto(len(pend),abs_pct,of,ofensor_grave)
     st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
@@ -643,7 +643,15 @@ elif pagina=='👔 Visão do Supervisor':
         if ocorrencias.empty:
             st.success('Nenhum ofensor ou observação registrado no período.')
         else:
-            st.dataframe(ocorrencias[['data','turno','responsavel','status','ofensor','observacoes']].rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','status':'Status','ofensor':'Ofensor','observacoes':'Observações'}),hide_index=True,use_container_width=True)
+            for _,oc in ocorrencias.sort_values('id',ascending=False).iterrows():
+                titulo=f"{oc['data']} • {nome_turno(oc['turno'])} • {oc['ofensor'] or 'Observação'}"
+                with st.expander(titulo,expanded=False):
+                    st.write(f"**Líder:** {oc['responsavel']}  |  **Status:** {oc['status']}")
+                    if pd.notna(oc['observacoes']) and str(oc['observacoes']).strip():
+                        st.markdown('**Observações / detalhes:**')
+                        st.text_area('Registro completo',value=str(oc['observacoes']),height=180,disabled=True,key=f"sup_obs_{oc['id']}",label_visibility='collapsed')
+                    else:
+                        st.caption('Sem observações adicionais.')
         st.markdown('#### Últimas passagens')
         st.dataframe(dados.sort_values('id',ascending=False)[['data','turno','responsavel','status','absenteismo']].rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','status':'Status','absenteismo':'Absenteísmo (%)'}),hide_index=True,use_container_width=True)
 
