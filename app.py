@@ -55,6 +55,26 @@ def consultar_transbordos(data_ref, turno_ref):
         quantidade+=1
     return totais,quantidade
 
+@st.cache_data(ttl=45,show_spinner=False)
+def consultar_fluxo_transbordos(data_ref, turno_ref):
+    """Consulta os dois tipos de movimento do app Transbordos separadamente."""
+    import json, urllib.parse, urllib.request
+    url='https://transbordos-cda02-online.onrender.com/api/viagens?'+urllib.parse.urlencode({'data':str(data_ref),'turno':str(turno_ref)})
+    with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as resposta:
+        registros=json.load(resposta)
+    if not isinstance(registros,list):
+        raise ValueError('Resposta de transbordos inválida')
+    resultado={'Recebimento':{'viagens':0,'paletes':0},'Carregamento':{'viagens':0,'paletes':0}}
+    for item in registros:
+        tipo=str(item.get('tipo') or '').strip()
+        if (str(item.get('data_operacional'))!=str(data_ref)
+            or str(item.get('turno'))!=str(turno_ref)
+            or tipo not in resultado or item.get('excluido_em')):
+            continue
+        resultado[tipo]['viagens']+=1
+        resultado[tipo]['paletes']+=int(item.get('paletes') or 0)
+    return resultado
+
 def conn(): return PgConnection()
 
 LIDERES = {
@@ -489,6 +509,40 @@ elif pagina=='👔 Visão do Supervisor':
         dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di),str(dfim)))
     else:
         dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? AND turno=? ORDER BY id DESC',(op,str(di),str(dfim),turno_filtro))
+    if op=='CDA 02':
+        st.markdown('#### 🚛 Transbordos — Recebimento e Carregamento')
+        st.caption('Dados consultados diretamente do aplicativo de Transbordos, respeitando data e turno. Independem do preenchimento da passagem.')
+        periodo=(dfim-di).days+1
+        if periodo>31:
+            st.info('Para consultar os transbordos, selecione um período de até 31 dias.')
+        else:
+            receb_v=receb_p=carreg_v=carreg_p=0
+            erros_consulta=0
+            detalhe_fluxo=[]
+            turnos_api=['T1','T2','T3'] if turno_filtro=='Todos os turnos' else [turno_filtro]
+            for dia in pd.date_range(di,dfim):
+                for turno_api in turnos_api:
+                    try:
+                        fluxo=consultar_fluxo_transbordos(dia.date().isoformat(),turno_api)
+                        r=fluxo['Recebimento']
+                        c=fluxo['Carregamento']
+                        receb_v+=r['viagens']; receb_p+=r['paletes']
+                        carreg_v+=c['viagens']; carreg_p+=c['paletes']
+                        detalhe_fluxo.append({'Data':dia.date(),'Turno':nome_turno(turno_api),'Viagens recebidas':r['viagens'],'Paletes recebidos':r['paletes'],'Viagens carregadas':c['viagens'],'Paletes carregados':c['paletes']})
+                    except Exception:
+                        erros_consulta+=1
+            if erros_consulta:
+                st.warning(f'Não foi possível consultar {erros_consulta} combinação(ões) de data e turno no aplicativo de Transbordos. Os totais abaixo são parciais.')
+            if detalhe_fluxo:
+                a,b,c,d=st.columns(4)
+                a.metric('Viagens recebidas',receb_v)
+                b.metric('Paletes recebidos',receb_p)
+                c.metric('Viagens carregadas',carreg_v)
+                d.metric('Paletes carregados',carreg_p)
+                with st.expander('Detalhamento por data e turno'):
+                    st.dataframe(pd.DataFrame(detalhe_fluxo),use_container_width=True,hide_index=True)
+            elif not erros_consulta:
+                st.info('Sem movimentos de recebimento ou carregamento no período.')
     if dados.empty:
         st.info('Não há passagens registradas para esta área no período selecionado.')
     else:
