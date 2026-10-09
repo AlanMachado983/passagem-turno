@@ -57,6 +57,21 @@ def consultar_transbordos(data_ref, turno_ref):
 
 def conn(): return PgConnection()
 
+LIDERES = {
+    "ALISON RIBEIRO DE OLIVEIRA": ("CDA 01", "ANDRE FORTUNATO", "T1"),
+    "ANDERSON DE MELO ALMEIDA": ("CDA 01", "ANDRE FORTUNATO", "T3"),
+    "LUIZ FELIPE DA SILVA DOMINGUES": ("CDA 01", "ANDRE FORTUNATO", "T2"),
+    "BRUNO RICARDO DE OLIVEIRA MELO": ("CDA 01", "MARCIO HENRIQUE SCHAFFER", "T3"),
+    "WESLEY VITOR RODRIGUES": ("CDA 01", "MARCIO HENRIQUE SCHAFFER", "T2"),
+    "LUCIANO ALVES DA SILVA JUNIOR": ("CDA 02", "FRANCISCO FERREIRA CARNEIRO JUNIOR", "T3"),
+    "MARIO GODOY": ("CDA 02", "FRANCISCO FERREIRA CARNEIRO JUNIOR", "T1"),
+    "ALAN MACHADO DO NASCIMENTO": ("CDA 02", "FRANCISCO FERREIRA CARNEIRO JUNIOR", "T2"),
+    "ANILSON APARECIDO PEDROSO": ("Estoque", "WAGNER LUIZ GALONE SANCHES FILHO", "2X2 2A"),
+    "JOHN HERBERT BATISTA DA SILVA": ("Estoque", "WAGNER LUIZ GALONE SANCHES FILHO", "2X2 2B"),
+    "FABIANA VIEIRA DA SILVA": ("Estoque", "WAGNER LUIZ GALONE SANCHES FILHO", "2X2 1A"),
+    "LUIS FELIPE OLIVEIRA SILVA": ("Estoque", "WAGNER LUIZ GALONE SANCHES FILHO", "2X2 1B"),
+}
+
 def nome_turno(turno):
     return {'T1':'1º Turno','T2':'2º Turno','T3':'3º Turno'}.get(str(turno),str(turno))
 
@@ -242,13 +257,23 @@ elif pagina=='🎯 Planejado do Dia':
 
 elif pagina=='📝 Nova Passagem':
     st.header('📝 Nova passagem')
-    a,b,c,dcol=st.columns(4)
-    resp=a.text_input('Responsável pela passagem',placeholder='Nome do líder')
-    area=b.selectbox('Área',['CDA 01','CDA 02','Estoque'])
-    turno_nome=c.selectbox('Turno',['1º Turno','2º Turno','3º Turno'])
-    turno={'1º Turno':'T1','2º Turno':'T2','3º Turno':'T3'}[turno_nome]
-    data_reg=dcol.date_input('Data',date.today())
-    operacao='CDA 02' if area=='CDA 02' else ('Estoque' if area=='Estoque' else st.selectbox('Operação',['CDA 01 - Separação','CDA 01 - Carregamento']))
+    st.caption('Selecione o líder para preencher automaticamente a área, o responsável e o turno.')
+    resp=st.selectbox('👤 Líder',options=list(LIDERES),index=None,placeholder='Selecione seu nome')
+    if not resp:
+        st.info('Selecione o líder para iniciar a passagem de turno.')
+        st.stop()
+    area,supervisor,turno=LIDERES[resp]
+    turno_nome=nome_turno(turno) if turno in ('T1','T2','T3') else turno
+    a,b,c=st.columns(3)
+    a.text_input('Área',value=area,disabled=True)
+    b.text_input('Turno',value=turno_nome,disabled=True)
+    c.text_input('Responsável',value=supervisor,disabled=True)
+    data_reg=st.date_input('Data',date.today())
+    # CDA 01: operação padrão temporária até definição da passagem unificada.
+    # Preserva a estrutura e os dados históricos de Separação e Carregamento.
+    operacao='CDA 01 - Separação' if area=='CDA 01' else ('CDA 02' if area=='CDA 02' else 'Estoque')
+    if area=='CDA 01':
+        st.caption('CDA 01: entrada única, sem seleção de Separação ou Carregamento nesta etapa.')
 
     st.subheader('👥 Equipe')
     h1,h2=st.columns(2); hc=int(h1.number_input('Headcount do turno',min_value=0,step=1)); aus=int(h2.number_input('Ausências',min_value=0,step=1))
