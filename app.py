@@ -483,7 +483,12 @@ elif pagina=='👔 Visão do Supervisor':
     if di>dfim:
         st.warning('A data inicial deve ser anterior ou igual à data final.')
         st.stop()
-    dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di),str(dfim)))
+    turnos_disponiveis=['T1','T2','T3'] if op!='Estoque' else ['2X2 1A','2X2 1B','2X2 2A','2X2 2B']
+    turno_filtro=st.selectbox('Filtrar turno',['Todos os turnos']+turnos_disponiveis,format_func=lambda x: nome_turno(x) if x!='Todos os turnos' else x,key='sup_turno')
+    if turno_filtro=='Todos os turnos':
+        dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di),str(dfim)))
+    else:
+        dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? AND turno=? ORDER BY id DESC',(op,str(di),str(dfim),turno_filtro))
     if dados.empty:
         st.info('Não há passagens registradas para esta área no período selecionado.')
     else:
