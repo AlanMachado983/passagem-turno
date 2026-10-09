@@ -36,6 +36,25 @@ class PgConnection:
     def rollback(self): self._conn.rollback()
     def close(self): self._conn.close()
 
+@st.cache_data(ttl=45, show_spinner=False)
+def consultar_transbordos(data_ref, turno_ref):
+    import json, urllib.parse, urllib.request, unicodedata
+    url = 'https://transbordos-cda02-online.onrender.com/api/viagens?' + urllib.parse.urlencode({'data':str(data_ref),'turno':str(turno_ref)})
+    with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as resposta:
+        registros=json.load(resposta)
+    if not isinstance(registros,list):
+        raise ValueError('Resposta inválida')
+    totais={n:0 for n in ['Ensaque','Úmidos','Biscoito','Expedição','Estoque','Fornecedores','Outros']}
+    quantidade=0
+    for item in registros:
+        if str(item.get('data_operacional'))!=str(data_ref) or str(item.get('turno'))!=str(turno_ref) or item.get('tipo') not in ('Recebimento','Carregamento') or item.get('excluido_em'):
+            continue
+        nome=unicodedata.normalize('NFKD',str(item.get('setor') or '')).encode('ascii','ignore').decode().lower()
+        setor=('Ensaque' if 'ensaque' in nome else 'Úmidos' if 'umido' in nome else 'Biscoito' if 'biscoito' in nome else 'Expedição' if any(x in nome for x in ('expedi','cda01','cda 01')) else 'Estoque' if 'estoque' in nome else 'Fornecedores' if 'fornecedor' in nome else 'Outros')
+        totais[setor]+=int(item.get('paletes') or 0)
+        quantidade+=1
+    return totais,quantidade
+
 def conn(): return PgConnection()
 
 def nome_turno(turno):
@@ -256,10 +275,20 @@ elif pagina=='📝 Nova Passagem':
         pc=scalar_plan(data_reg,turno,operacao,'Cargas'); pp=scalar_plan(data_reg,turno,operacao,'Paletes/UZs')
         x,y,z=st.columns(3); cargas=x.number_input('Cargas separadas',min_value=0.0,step=1.0); uz=y.number_input('Paletes / UZs separados',min_value=0.0,step=1.0); pd_e=z.number_input('P&D Espera',min_value=0.0,step=1.0)
         st.info(f'Planejado: {pc:g} cargas | {pp:g} paletes/UZs')
-        st.markdown('**Transbordos (paletes)**'); cs=st.columns(4); tr=[]
-        for col,nome in zip(cs,['Ensaque','Úmidos','Biscoito','Expedição']): tr.append(col.number_input(nome,min_value=0.0,step=1.0))
-        cs2=st.columns(3)
-        for col,nome in zip(cs2,['Estoque','Fornecedores','Outros']): tr.append(col.number_input(nome,min_value=0.0,step=1.0))
+        st.markdown('**Transbordos (paletes)**')
+        st.caption('Automático: soma recebimentos e carregamentos por setor, na data e turno selecionados.')
+        setores_trans=['Ensaque','Úmidos','Biscoito','Expedição','Estoque','Fornecedores','Outros']
+        try:
+            totais_trans,qtd_mov=consultar_transbordos(data_reg,turno)
+            tr=[float(totais_trans[nome]) for nome in setores_trans]
+            cols_trans=st.columns(4)
+            for i,nome in enumerate(setores_trans):
+                cols_trans[i%4].metric(nome,f'{int(tr[i])} paletes')
+            st.success(f'{qtd_mov} movimentações consultadas. Total: {int(sum(tr))} paletes.')
+            st.caption('Atualização da consulta a cada 45 segundos; valores registrados na passagem ao salvar.')
+        except Exception:
+            st.error('Transbordos indisponível: não é possível preencher automaticamente. Atualize a página e tente novamente.')
+            st.stop()
         trans=sum(tr); pt=pp
         st.markdown('### 🔎 Conferência CDA 02')
         st.caption('Dados da mesma data, turno e responsável desta passagem. Percentuais automáticos.')
