@@ -269,11 +269,17 @@ elif pagina=='📝 Nova Passagem':
     b.text_input('Turno',value=turno_nome,disabled=True)
     c.text_input('Responsável',value=supervisor,disabled=True)
     data_reg=st.date_input('Data',date.today())
-    # CDA 01: operação padrão temporária até definição da passagem unificada.
-    # Preserva a estrutura e os dados históricos de Separação e Carregamento.
-    operacao='CDA 01 - Separação' if area=='CDA 01' else ('CDA 02' if area=='CDA 02' else 'Estoque')
+    # Permissões operacionais por líder; a área e o turno permanecem automáticos.
     if area=='CDA 01':
-        st.caption('CDA 01: entrada única, sem seleção de Separação ou Carregamento nesta etapa.')
+        if resp=='ALISON RIBEIRO DE OLIVEIRA':
+            operacao=st.selectbox('Operação autorizada',['CDA 01 - Separação','CDA 01 - Carregamento'])
+        elif resp in ('BRUNO RICARDO DE OLIVEIRA MELO','WESLEY VITOR RODRIGUES'):
+            operacao='CDA 01 - Carregamento'
+        else:
+            operacao='CDA 01 - Separação'
+        st.caption('Operação: '+operacao.replace('CDA 01 - ',''))
+    else:
+        operacao='CDA 02' if area=='CDA 02' else 'Estoque'
 
     st.subheader('👥 Equipe')
     h1,h2=st.columns(2); hc=int(h1.number_input('Headcount do turno',min_value=0,step=1)); aus=int(h2.number_input('Ausências',min_value=0,step=1))
