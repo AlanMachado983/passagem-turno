@@ -64,7 +64,7 @@ def consultar_fluxo_transbordos(data_ref, turno_ref):
         registros=json.load(resposta)
     if not isinstance(registros,list):
         raise ValueError('Resposta de transbordos inválida')
-    resultado={'Recebimento':{'viagens':0,'paletes':0},'Carregamento':{'viagens':0,'paletes':0}}
+    resultado={'Recebimento':{'viagens':0,'paletes':0},'Carregamento':{'viagens':0,'paletes':0},'detalhes':[]}
     for item in registros:
         tipo=str(item.get('tipo') or '').strip()
         if (str(item.get('data_operacional'))!=str(data_ref)
@@ -73,6 +73,20 @@ def consultar_fluxo_transbordos(data_ref, turno_ref):
             continue
         resultado[tipo]['viagens']+=1
         resultado[tipo]['paletes']+=int(item.get('paletes') or 0)
+        cargas=item.get('transbordo_cargas') or []
+        resultado['detalhes'].append({
+            'Data':str(item.get('data_operacional') or ''),
+            'Turno':nome_turno(turno_ref),
+            'ID viagem':str(item.get('id') or ''),
+            'Movimentação':tipo,
+            'Origem':str(item.get('setor') or '') if tipo=='Recebimento' else 'CDA 02',
+            'Destino':'CDA 02' if tipo=='Recebimento' else str(item.get('setor') or ''),
+            'Paletes':int(item.get('paletes') or 0),
+            'Cargas':', '.join(str(c.get('numero_carga')) for c in cargas if c.get('numero_carga')),
+            'Operador':str(item.get('operador') or ''),
+            'Finalidade':str(item.get('finalidade') or ''),
+            'Observação':str(item.get('observacao') or ''),
+        })
     return resultado
 
 def conn(): return PgConnection()
@@ -519,11 +533,13 @@ elif pagina=='👔 Visão do Supervisor':
             receb_v=receb_p=carreg_v=carreg_p=0
             erros_consulta=0
             detalhe_fluxo=[]
+            viagens_detalhadas=[]
             turnos_api=['T1','T2','T3'] if turno_filtro=='Todos os turnos' else [turno_filtro]
             for dia in pd.date_range(di,dfim):
                 for turno_api in turnos_api:
                     try:
                         fluxo=consultar_fluxo_transbordos(dia.date().isoformat(),turno_api)
+                        viagens_detalhadas.extend(fluxo['detalhes'])
                         r=fluxo['Recebimento']
                         c=fluxo['Carregamento']
                         receb_v+=r['viagens']; receb_p+=r['paletes']
@@ -539,7 +555,13 @@ elif pagina=='👔 Visão do Supervisor':
                 b.metric('Paletes recebidos',receb_p)
                 c.metric('Viagens carregadas',carreg_v)
                 d.metric('Paletes carregados',carreg_p)
-                with st.expander('Detalhamento por data e turno'):
+                st.markdown('##### 🚛 Para onde foram os transbordos?')
+                st.caption('Em Recebimento, o setor informado é a origem; em Carregamento, é o destino. Cada linha representa uma viagem registrada.')
+                if viagens_detalhadas:
+                    st.dataframe(pd.DataFrame(viagens_detalhadas),use_container_width=True,hide_index=True)
+                else:
+                    st.info('Nenhuma viagem detalhada encontrada no período.')
+                with st.expander('Resumo por data e turno'):
                     st.dataframe(pd.DataFrame(detalhe_fluxo),use_container_width=True,hide_index=True)
             elif not erros_consulta:
                 st.info('Sem movimentos de recebimento ou carregamento no período.')
