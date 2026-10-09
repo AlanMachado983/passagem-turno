@@ -93,7 +93,7 @@ st.markdown('<div class="hero"><h1>Passagem de Turno</h1><p>Logística • CDA 0
 with st.sidebar:
     st.markdown('## ADIMAX')
     if os.path.exists('assets/caminhoes.png'): st.image('assets/caminhoes.png',use_container_width=True)
-    pagina=st.radio('Navegação',['📝 Nova Passagem','🔎 Conferência CDA 02','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
+    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
 
 if pagina=='📋 Planejamento':
     st.header('📋 Planejamento diário')
@@ -221,6 +221,7 @@ elif pagina=='📝 Nova Passagem':
     equip_parado=problema_equip=pend_prox=''
     pc=pt=pv=0.0
     pend=[]
+    conf_tc=conf_tu=conf_er=conf_cc=conf_uc=None
     st.subheader('📦 Resultado do turno')
     if operacao=='CDA 01 - Separação':
         pc=0.0; pt=scalar_plan(data_reg,'DIA',operacao,'Toneladas')
@@ -260,6 +261,21 @@ elif pagina=='📝 Nova Passagem':
         cs2=st.columns(3)
         for col,nome in zip(cs2,['Estoque','Fornecedores','Outros']): tr.append(col.number_input(nome,min_value=0.0,step=1.0))
         trans=sum(tr); pt=pp
+        st.markdown('### 🔎 Conferência CDA 02')
+        st.caption('Dados da mesma data, turno e responsável desta passagem. Percentuais automáticos.')
+        cc1,cc2,cc3=st.columns(3)
+        conf_tc=int(cc1.number_input('Total de cargas do turno',min_value=0,step=1,key='cda02_conf_tc'))
+        conf_tu=int(cc2.number_input('Total de UZs do turno',min_value=0,step=1,key='cda02_conf_tu'))
+        conf_er=int(cc3.number_input('Quantidade de erros',min_value=0,step=1,key='cda02_conf_er'))
+        cc4,cc5=st.columns(2)
+        conf_cc=int(cc4.number_input('Cargas conferidas',min_value=0,step=1,key='cda02_conf_cc'))
+        conf_uc=int(cc5.number_input('UZs conferidas',min_value=0,step=1,key='cda02_conf_uc'))
+        cm1,cm2,cm3=st.columns(3)
+        cm1.metric('Cargas conferidas',conf_cc)
+        cm2.metric('% cargas conferidas',f'{pct(conf_cc,conf_tc):.1f}%' if conf_tc else '—')
+        cm3.metric('% UZs conferidas',f'{pct(conf_uc,conf_tu):.1f}%' if conf_tu else '—')
+        st.caption('Se já houver passagem para esta data e turno, o salvamento atualizará o registro existente.')
+
     else:
         st.markdown('### 🏭 Indicadores principais')
         a1,a2=st.columns(2)
@@ -306,7 +322,8 @@ elif pagina=='📝 Nova Passagem':
     stat=status_auto(len(pend),[ac,at,av]); st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
     if st.button('💾 Salvar passagem',type='primary',use_container_width=True):
         if not resp.strip(): st.error('Informe o responsável pela passagem.')
-        elif aus>hc and hc>0: st.error('Ausências não pode ser maior que o headcount.')
+        elif aus>hc: st.error('Ausências não pode ser maior que o headcount.')
+        elif operacao=='CDA 02' and (conf_cc>conf_tc or conf_uc>conf_tu): st.error('A quantidade conferida não pode superar o total.')
         else:
             c=conn();cur=c.cursor()
             cur.execute('''INSERT INTO passagens(
@@ -318,8 +335,9 @@ elif pagina=='📝 Nova Passagem':
             recebimento_producao_kg,recebimento_producao_paletes,abastecimento_picking_kg,abastecimento_picking_paletes,
             carretas_descarregadas,carretas_armazenadas,carretas_aguardando,transbordos_cda02,
             reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
-            varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
+            conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas
+            ) VALUES ((?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)  ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO UPDATE SET responsavel=EXCLUDED.responsavel, headcount=EXCLUDED.headcount, ausencias=EXCLUDED.ausencias, presentes=EXCLUDED.presentes, absenteismo=EXCLUDED.absenteismo, cargas_realizadas=EXCLUDED.cargas_realizadas, toneladas_realizadas=EXCLUDED.toneladas_realizadas, veiculos_trabalhados=EXCLUDED.veiculos_trabalhados, veiculos_carregados=EXCLUDED.veiculos_carregados, veiculos_pendentes=EXCLUDED.veiculos_pendentes, uz_paletes=EXCLUDED.uz_paletes, pd_espera=EXCLUDED.pd_espera, transbordo_total=EXCLUDED.transbordo_total, toneladas_estoque=EXCLUDED.toneladas_estoque, paletes_estoque=EXCLUDED.paletes_estoque, planejado_cargas=EXCLUDED.planejado_cargas, planejado_ton=EXCLUDED.planejado_ton, planejado_veiculos=EXCLUDED.planejado_veiculos, gap_cargas=EXCLUDED.gap_cargas, gap_ton=EXCLUDED.gap_ton, gap_veiculos=EXCLUDED.gap_veiculos, ating_cargas=EXCLUDED.ating_cargas, ating_ton=EXCLUDED.ating_ton, ating_veiculos=EXCLUDED.ating_veiculos, ofensor=EXCLUDED.ofensor, observacoes=EXCLUDED.observacoes, status=EXCLUDED.status, recebimento_producao_kg=EXCLUDED.recebimento_producao_kg, recebimento_producao_paletes=EXCLUDED.recebimento_producao_paletes, abastecimento_picking_kg=EXCLUDED.abastecimento_picking_kg, abastecimento_picking_paletes=EXCLUDED.abastecimento_picking_paletes, carretas_descarregadas=EXCLUDED.carretas_descarregadas, carretas_armazenadas=EXCLUDED.carretas_armazenadas, carretas_aguardando=EXCLUDED.carretas_aguardando, transbordos_cda02=EXCLUDED.transbordos_cda02, reembalo_enviados=EXCLUDED.reembalo_enviados, reprocesso_enviados=EXCLUDED.reprocesso_enviados, maquinas_paradas=EXCLUDED.maquinas_paradas, equipamento_parado=EXCLUDED.equipamento_parado, problema_equipamento=EXCLUDED.problema_equipamento, pendencias_proximo_turno=EXCLUDED.pendencias_proximo_turno, varejo_cargas=EXCLUDED.varejo_cargas, varejo_ton=EXCLUDED.varejo_ton, transferencias_qtd=EXCLUDED.transferencias_qtd, transferencias_ton=EXCLUDED.transferencias_ton, conf_total_cargas=EXCLUDED.conf_total_cargas, conf_total_uzs=EXCLUDED.conf_total_uzs, conf_erros=EXCLUDED.conf_erros, conf_cargas_conferidas=EXCLUDED.conf_cargas_conferidas, conf_uzs_conferidas=EXCLUDED.conf_uzs_conferidas RETURNING id''',
             (datetime.now().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
              cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
              receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
@@ -327,50 +345,6 @@ elif pagina=='📝 Nova Passagem':
             for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
             c.commit();c.close();st.success('Passagem salva com sucesso.')
 
-
-elif pagina=='🔎 Conferência CDA 02':
-    st.header('🔎 Conferência CDA 02')
-    st.caption('Lançamento diário por turno. Os percentuais são calculados automaticamente.')
-    c1,c2,c3=st.columns(3)
-    d=c1.date_input('Data da conferência',date.today(),key='conf_data')
-    t_nome=c2.selectbox('Turno',['1º Turno','2º Turno','3º Turno'],key='conf_turno')
-    t={'1º Turno':'T1','2º Turno':'T2','3º Turno':'T3'}[t_nome]
-    responsavel=c3.text_input('Responsável',key='conf_resp')
-    a,b,c=st.columns(3)
-    total_cargas=int(a.number_input('Total de cargas do turno',min_value=0,step=1,key='conf_tc'))
-    total_uzs=int(b.number_input('Total de UZs',min_value=0,step=1,key='conf_tu'))
-    erros=int(c.number_input('Quantidade de erros',min_value=0,step=1,key='conf_erros'))
-    x,y=st.columns(2)
-    cargas_conf=int(x.number_input('Cargas conferidas',min_value=0,step=1,key='conf_cc'))
-    uzs_conf=int(y.number_input('UZs conferidas',min_value=0,step=1,key='conf_uc'))
-    m1,m2,m3=st.columns(3)
-    m1.metric('Cargas conferidas',f'{cargas_conf:g}')
-    m2.metric('% cargas conferidas',f'{pct(cargas_conf,total_cargas):.1f}%' if total_cargas else '—')
-    m3.metric('% UZs conferidas',f'{pct(uzs_conf,total_uzs):.1f}%' if total_uzs else '—')
-    if st.button('💾 Salvar conferência',type='primary'):
-        if not responsavel.strip(): st.error('Informe o responsável.')
-        elif cargas_conf>total_cargas or uzs_conf>total_uzs: st.error('Conferido não pode ser maior que o total do turno.')
-        else:
-            db=conn()
-            try:
-                cur=db.cursor()
-                cur.execute('INSERT INTO conferencia_cda02(data,turno,responsavel,total_cargas,total_uzs,quantidade_erros,cargas_conferidas,uzs_conferidas) VALUES(?,?,?,?,?,?,?,?)',(str(d),t,responsavel.strip(),total_cargas,total_uzs,erros,cargas_conf,uzs_conf))
-                db.commit()
-                st.success('Conferência salva no Supabase.')
-            except Exception:
-                db.rollback()
-                st.error('Não foi possível salvar a conferência. Verifique a conexão e tente novamente.')
-            finally:
-                db.close()
-    st.markdown('### Histórico de conferência')
-    conf=query('SELECT id,data,turno,responsavel,total_cargas,total_uzs,quantidade_erros,cargas_conferidas,uzs_conferidas FROM conferencia_cda02 ORDER BY data DESC,id DESC LIMIT 100')
-    if conf.empty: st.info('Ainda não há conferências lançadas.')
-    else:
-        conf['% cargas conferidas']=conf.apply(lambda r: pct(r['cargas_conferidas'],r['total_cargas']),axis=1).round(1)
-        conf['% UZs conferidas']=conf.apply(lambda r: pct(r['uzs_conferidas'],r['total_uzs']),axis=1).round(1)
-        conf['turno']=conf['turno'].apply(nome_turno)
-        st.dataframe(conf,use_container_width=True,hide_index=True)
-        st.download_button('⬇️ Exportar conferência CSV',conf.to_csv(index=False).encode('utf-8-sig'),'conferencia_cda02.csv','text/csv')
 
 elif pagina=='👁️ Visão Atual':
     st.header('👁️ Visão atual')
