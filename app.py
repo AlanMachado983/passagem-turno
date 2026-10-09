@@ -93,7 +93,7 @@ st.markdown('<div class="hero"><h1>Passagem de Turno</h1><p>Logística • CDA 0
 with st.sidebar:
     st.markdown('## ADIMAX')
     if os.path.exists('assets/caminhoes.png'): st.image('assets/caminhoes.png',use_container_width=True)
-    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
+    pagina=st.radio('Navegação',['📝 Nova Passagem','🔎 Conferência CDA 02','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
 
 if pagina=='📋 Planejamento':
     st.header('📋 Planejamento diário')
@@ -326,6 +326,51 @@ elif pagina=='📝 Nova Passagem':
              equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton)); pid=cur.lastrowid
             for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
             c.commit();c.close();st.success('Passagem salva com sucesso.')
+
+
+elif pagina=='🔎 Conferência CDA 02':
+    st.header('🔎 Conferência CDA 02')
+    st.caption('Lançamento diário por turno. Os percentuais são calculados automaticamente.')
+    c1,c2,c3=st.columns(3)
+    d=c1.date_input('Data da conferência',date.today(),key='conf_data')
+    t_nome=c2.selectbox('Turno',['1º Turno','2º Turno','3º Turno'],key='conf_turno')
+    t={'1º Turno':'T1','2º Turno':'T2','3º Turno':'T3'}[t_nome]
+    responsavel=c3.text_input('Responsável',key='conf_resp')
+    a,b,c=st.columns(3)
+    total_cargas=int(a.number_input('Total de cargas do turno',min_value=0,step=1,key='conf_tc'))
+    total_uzs=int(b.number_input('Total de UZs',min_value=0,step=1,key='conf_tu'))
+    erros=int(c.number_input('Quantidade de erros',min_value=0,step=1,key='conf_erros'))
+    x,y=st.columns(2)
+    cargas_conf=int(x.number_input('Cargas conferidas',min_value=0,step=1,key='conf_cc'))
+    uzs_conf=int(y.number_input('UZs conferidas',min_value=0,step=1,key='conf_uc'))
+    m1,m2,m3=st.columns(3)
+    m1.metric('Cargas conferidas',f'{cargas_conf:g}')
+    m2.metric('% cargas conferidas',f'{pct(cargas_conf,total_cargas):.1f}%' if total_cargas else '—')
+    m3.metric('% UZs conferidas',f'{pct(uzs_conf,total_uzs):.1f}%' if total_uzs else '—')
+    if st.button('💾 Salvar conferência',type='primary'):
+        if not responsavel.strip(): st.error('Informe o responsável.')
+        elif cargas_conf>total_cargas or uzs_conf>total_uzs: st.error('Conferido não pode ser maior que o total do turno.')
+        else:
+            db=conn()
+            try:
+                cur=db.cursor()
+                cur.execute('INSERT INTO conferencia_cda02(data,turno,responsavel,total_cargas,total_uzs,quantidade_erros,cargas_conferidas,uzs_conferidas) VALUES(?,?,?,?,?,?,?,?)',(str(d),t,responsavel.strip(),total_cargas,total_uzs,erros,cargas_conf,uzs_conf))
+                db.commit()
+                st.success('Conferência salva no Supabase.')
+            except Exception:
+                db.rollback()
+                st.error('Não foi possível salvar a conferência. Verifique a conexão e tente novamente.')
+            finally:
+                db.close()
+    st.markdown('### Histórico de conferência')
+    conf=query('SELECT id,data,turno,responsavel,total_cargas,total_uzs,quantidade_erros,cargas_conferidas,uzs_conferidas FROM conferencia_cda02 ORDER BY data DESC,id DESC LIMIT 100')
+    if conf.empty: st.info('Ainda não há conferências lançadas.')
+    else:
+        conf['% cargas conferidas']=conf.apply(lambda r: pct(r['cargas_conferidas'],r['total_cargas']),axis=1).round(1)
+        conf['% UZs conferidas']=conf.apply(lambda r: pct(r['uzs_conferidas'],r['total_uzs']),axis=1).round(1)
+        conf['turno']=conf['turno'].apply(nome_turno)
+        st.dataframe(conf,use_container_width=True,hide_index=True)
+        st.download_button('⬇️ Exportar conferência CSV',conf.to_csv(index=False).encode('utf-8-sig'),'conferencia_cda02.csv','text/csv')
 
 elif pagina=='👁️ Visão Atual':
     st.header('👁️ Visão atual')
