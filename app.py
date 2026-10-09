@@ -550,6 +550,20 @@ elif pagina=='👔 Visão do Supervisor':
             if erros_consulta:
                 st.warning(f'Não foi possível consultar {erros_consulta} combinação(ões) de data e turno no aplicativo de Transbordos. Os totais abaixo são parciais.')
             if detalhe_fluxo:
+                st.markdown('##### 📦 Paletes movimentados por setor')
+                setores_resumo=['Ensaque','Úmidos','Biscoito','Expedição','Estoque','Fornecedores','Outros']
+                totais_setor={nome:0 for nome in setores_resumo}
+                import unicodedata
+                for viagem in viagens_detalhadas:
+                    setor_bruto=viagem['Origem'] if viagem['Movimentação']=='Recebimento' else viagem['Destino']
+                    nome=unicodedata.normalize('NFKD',str(setor_bruto)).encode('ascii','ignore').decode().lower()
+                    setor=('Ensaque' if 'ensaque' in nome else 'Úmidos' if 'umido' in nome else 'Biscoito' if 'biscoito' in nome else 'Expedição' if any(x in nome for x in ('expedi','cda01','cda 01')) else 'Estoque' if 'estoque' in nome else 'Fornecedores' if 'fornecedor' in nome else 'Outros')
+                    totais_setor[setor]+=viagem['Paletes']
+                cols_setor=st.columns(4)
+                for i,nome in enumerate(setores_resumo):
+                    cols_setor[i%4].metric(nome,f"{totais_setor[nome]} paletes")
+                st.success(f"{receb_v+carreg_v} movimentações consultadas. Total: {receb_p+carreg_p} paletes.")
+                st.caption('Resumo consolidado de recebimentos e carregamentos, sem duplicar viagens.')
                 a,b,c,d=st.columns(4)
                 a.metric('Viagens recebidas',receb_v)
                 b.metric('Paletes recebidos',receb_p)
