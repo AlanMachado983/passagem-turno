@@ -116,30 +116,54 @@ with st.sidebar:
 
 if pagina=='📋 Planejamento':
     st.header('📋 Planejamento diário')
-    st.caption('Por enquanto, o planejamento diário é somente de toneladas de Separação.')
-    c1,c2=st.columns(2)
-    d=c1.date_input('Data',date.today())
-    valor=c2.number_input('Planejado de Separação (toneladas)',min_value=0.0,step=1.0,format='%.1f',help='Digite em toneladas. Exemplo: 574 para 574 toneladas.')
+    st.caption('Metas diárias de Separação e Carregamento. Ao salvar novamente a mesma data, as metas são atualizadas.')
+    d=st.date_input('Data do planejamento',date.today())
+    st.markdown('#### 📦 Separação')
+    sep_plan=st.number_input('Toneladas planejadas de Separação',min_value=0.0,step=1.0,format='%.1f',value=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas'),key=f'sep_{d}')
+    st.markdown('#### 🚛 Carregamento')
+    x,y=st.columns(2)
+    car_qtd=x.number_input('Veículos / cargas planejados',min_value=0,step=1,value=int(scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')),key=f'car_qtd_{d}')
+    car_ton=y.number_input('Toneladas planejadas de Carregamento',min_value=0.0,step=1.0,format='%.1f',value=scalar_plan(d,'DIA','CDA 01 - Carregamento','Toneladas'),key=f'car_ton_{d}')
     if st.button('💾 Salvar / atualizar planejamento diário',type='primary'):
-        valor_salvar=valor/1000.0 if valor>=10000 else valor
-        c=conn(); cur=c.cursor(); agora=datetime.now().isoformat(timespec='seconds')
-        cur.execute("""INSERT INTO planejamento(data,operacao,indicador,planejado,atualizado_em)
-            VALUES(?,'CDA 01 - Separação','Toneladas',?,?)
-            ON CONFLICT (data,operacao,indicador)
-            DO UPDATE SET planejado=EXCLUDED.planejado, atualizado_em=EXCLUDED.atualizado_em""",
-            (str(d),valor_salvar,agora))
-        c.commit(); c.close(); st.success('Planejamento diário salvo.'); st.rerun()
-    df=query("SELECT id,data,planejado,atualizado_em FROM planejamento WHERE operacao='CDA 01 - Separação' AND indicador='Toneladas' ORDER BY data DESC,id DESC LIMIT 50")
+        c=conn()
+        try:
+            cur=c.cursor()
+            agora=datetime.now().isoformat(timespec='seconds')
+            for op,indicador,valor in [
+                ('CDA 01 - Separação','Toneladas',sep_plan),
+                ('CDA 01 - Carregamento','Veículos',car_qtd),
+                ('CDA 01 - Carregamento','Toneladas',car_ton),
+            ]:
+                cur.execute("""INSERT INTO planejamento(data,operacao,indicador,planejado,atualizado_em)
+                    VALUES(?,?,?,?,?)
+                    ON CONFLICT (data,operacao,indicador)
+                    DO UPDATE SET planejado=EXCLUDED.planejado, atualizado_em=EXCLUDED.atualizado_em""",
+                    (str(d),op,indicador,valor,agora))
+            c.commit()
+            st.success('Planejamento atualizado para a data selecionada.')
+            st.rerun()
+        except Exception:
+            c.rollback()
+            st.error('Não foi possível salvar o planejamento. Verifique a conexão e a estrutura da tabela.')
+        finally:
+            c.close()
+    df=query("""SELECT data,operacao,indicador,planejado,atualizado_em
+                FROM planejamento
+                WHERE operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento')
+                ORDER BY data DESC,atualizado_em DESC LIMIT 150""")
     if not df.empty:
-        ex=df.rename(columns={'data':'Data','planejado':'Planejado Separação (t)','atualizado_em':'Atualizado em'})
-        st.dataframe(ex.drop(columns=['id']),width='stretch',hide_index=True)
-    else: st.info('Ainda não existe planejamento diário cadastrado.')
+        st.markdown('#### Planejamentos registrados')
+        st.dataframe(df.rename(columns={'data':'Data','operacao':'Operação','indicador':'Indicador','planejado':'Planejado','atualizado_em':'Atualizado em'}),use_container_width=True,hide_index=True)
+    else:
+        st.info('Ainda não existe planejamento diário cadastrado.')
 
 elif pagina=='🎯 Planejado do Dia':
     st.header('🎯 Painel de Gestão à Vista')
     st.caption('Logística • fechamento diário para acompanhamento e GDD')
     d=st.date_input('Data do painel',date.today(),key='data_painel_dia')
     plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
+    plan_car_qtd=scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')
+    plan_car_ton=scalar_plan(d,'DIA','CDA 01 - Carregamento','Toneladas')
     if plan_sep>=10000: plan_sep=plan_sep/1000.0
     dados=query("SELECT * FROM passagens WHERE data=? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d),))
     if not dados.empty:
@@ -205,8 +229,14 @@ elif pagina=='🎯 Planejado do Dia':
         if not sep.empty and not sep[sep.turno==t].empty: v=em_toneladas(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
         col.metric(nome_turno(t),f'{v:.1f} t')
     st.markdown('---'); st.markdown('### 🚛 Carregamento')
-    st.caption('Realizado do dia — sem planejamento por enquanto.')
-    c1,c2=st.columns(2); c1.metric('Cargas carregadas no dia',f'{cargas_car:g}'); c2.metric('Toneladas carregadas no dia',f'{ton_car:.1f} t')
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric('Veículos planejados',f'{plan_car_qtd:g}')
+    c2.metric('Veículos carregados',f'{cargas_car:g}',f'{cargas_car-plan_car_qtd:+g} vs meta' if plan_car_qtd else None)
+    c3.metric('Toneladas planejadas',f'{plan_car_ton:.1f} t')
+    c4.metric('Toneladas carregadas',f'{ton_car:.1f} t',f'{ton_car-plan_car_ton:+.1f} t vs meta' if plan_car_ton else None)
+    a,b=st.columns(2)
+    a.metric('Atingimento veículos',f'{pct(cargas_car,plan_car_qtd):.1f}%' if plan_car_qtd else '—')
+    b.metric('Atingimento toneladas',f'{pct(ton_car,plan_car_ton):.1f}%' if plan_car_ton else '—')
     st.markdown('#### Realizado por turno — Carregamento')
     cols=st.columns(3)
     for col,t in zip(cols,['T1','T2','T3']):
