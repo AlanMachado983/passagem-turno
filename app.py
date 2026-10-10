@@ -183,6 +183,109 @@ def status_auto(pend, absenteismo, ofensor='Sem ofensor', ofensor_grave=False):
         return '🟡 Atenção'
     return '🟢 Normal'
 
+
+def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
+    """Salva uma correção explícita e sua versão anterior na mesma transação."""
+    import json
+    permitidos={'data','turno','responsavel','ofensor','observacoes','status'}
+    if not alteracoes or not set(alteracoes).issubset(permitidos):
+        raise ValueError('Campos de edição inválidos.')
+    if not autor.strip() or not motivo.strip():
+        raise ValueError('Informe quem está corrigindo e o motivo.')
+    c=conn()
+    try:
+        cur=c.cursor()
+        cur.execute('SELECT to_jsonb(p)::text FROM passagens p WHERE id=? FOR UPDATE',(int(rid),))
+        row=cur.fetchone()
+        if not row:
+            raise ValueError('O registro não existe mais.')
+        anterior=json.loads(row[0])
+        if anterior!=original:
+            raise ValueError('Este registro foi alterado por outra pessoa. Recarregue e revise antes de salvar.')
+        if anterior['operacao']=='CDA 02':
+            cur.execute("SELECT id FROM passagens WHERE data=? AND turno=? AND area=? AND operacao=? AND id<>?",
+                        (alteracoes['data'],alteracoes['turno'],anterior['area'],anterior['operacao'],int(rid)))
+            if cur.fetchone():
+                raise ValueError('Já existe uma passagem CDA 02 na data e turno escolhidos. Nenhum registro foi alterado.')
+        cur.execute("""CREATE TABLE IF NOT EXISTS passagens_revisoes (
+            id BIGSERIAL PRIMARY KEY, passagem_id BIGINT NOT NULL,
+            alterado_em TIMESTAMPTZ NOT NULL, autor TEXT NOT NULL,
+            motivo TEXT NOT NULL, anterior JSONB NOT NULL, alteracoes JSONB NOT NULL
+        )""")
+        cur.execute("""INSERT INTO passagens_revisoes
+            (passagem_id,alterado_em,autor,motivo,anterior,alteracoes)
+            VALUES(?,?,?,?,?::jsonb,?::jsonb)""",
+            (int(rid),agora_operacional().isoformat(),autor.strip(),motivo.strip(),
+             json.dumps(anterior,ensure_ascii=False),json.dumps(alteracoes,ensure_ascii=False)))
+        campos=list(alteracoes)
+        cur.execute('UPDATE passagens SET '+', '.join(campo+'=?' for campo in campos)+' WHERE id=?',
+                    tuple(alteracoes[campo] for campo in campos)+(int(rid),))
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
+
+def editar_historico(df):
+    import json
+    with st.expander('✏️ Modificar registro'):
+        st.caption('Selecione a passagem. A data/hora original será mantida; cada correção guarda a versão anterior, o autor e o motivo.')
+        opcoes={int(r.id):f"ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao} • {r.responsavel}" for r in df.itertuples()}
+        rid=st.selectbox('Registro para modificar',list(opcoes),format_func=lambda x:opcoes[x],index=None,placeholder='Selecione uma passagem')
+        if rid is None:
+            return
+        chave=f'historico_original_{rid}'
+        if chave not in st.session_state:
+            registro=query('SELECT to_jsonb(p)::text AS registro FROM passagens p WHERE id=?',(rid,))
+            if registro.empty:
+                st.warning('Registro não encontrado.')
+                return
+            st.session_state[chave]=json.loads(registro.iloc[0]['registro'])
+        original=st.session_state[chave]
+        with st.form(f'editar_passagem_{rid}'):
+            nova_data=st.date_input('Data operacional',date.fromisoformat(str(original['data'])[:10]))
+            turnos=['T1','T2','T3'] if original['operacao']!='Estoque' else ['2X2 1A','2X2 1B','2X2 2A','2X2 2B']
+            if original['turno'] not in turnos:
+                turnos.append(original['turno'])
+            novo_turno=st.selectbox('Turno',turnos,index=turnos.index(original['turno']),format_func=nome_turno)
+            responsavel=st.text_input('Líder / responsável',value=original.get('responsavel') or '')
+            ofensor=st.text_input('Ofensor',value=original.get('ofensor') or 'Sem ofensor')
+            observacoes=st.text_area('Observações / detalhes',value=original.get('observacoes') or '',height=220)
+            estados=['🟢 Normal','🟡 Atenção','🔴 Crítico']
+            if original['status'] not in estados:
+                estados.append(original['status'])
+            status=st.selectbox('Status',estados,index=estados.index(original['status']))
+            st.caption(f"Operação: {original['operacao']} • Registro original: {original['criado_em']}")
+            autor=st.text_input('Quem está fazendo a correção?')
+            motivo=st.text_area('Motivo da correção')
+            confirmar=st.checkbox('Confirmo a alteração deste registro')
+            salvar=st.form_submit_button('💾 Salvar alteração',type='primary')
+        if salvar:
+            if not confirmar:
+                st.error('Confirme a alteração antes de salvar.')
+            elif not responsavel.strip():
+                st.error('Informe o líder / responsável.')
+            else:
+                alteracoes={'data':nova_data.isoformat(),'turno':novo_turno,'responsavel':responsavel.strip(),
+                            'ofensor':ofensor.strip() or 'Sem ofensor','observacoes':observacoes,'status':status}
+                if all(str(original.get(k) or '')==str(v) for k,v in alteracoes.items()):
+                    st.info('Nenhum campo foi modificado.')
+                else:
+                    try:
+                        salvar_edicao_historico(rid,original,alteracoes,autor,motivo)
+                    except ValueError as erro:
+                        st.error(str(erro))
+                    except Exception:
+                        st.error('Não foi possível salvar. Nenhuma alteração foi aplicada. Verifique a conexão e a permissão para criar a tabela de revisões.')
+                    else:
+                        del st.session_state[chave]
+                        st.session_state['historico_salvo']='Alteração salva. A versão anterior e o horário original foram preservados.'
+                        st.rerun()
+        if st.button('Recarregar registro selecionado',key=f'recarregar_{rid}'):
+            del st.session_state[chave]
+            st.rerun()
+
 st.markdown('''<style>
 .block-container{padding-top:1.1rem}.hero{background:linear-gradient(90deg,#111,#2a2a2a);padding:22px 28px;border-radius:16px;border-left:8px solid #f5b400;color:white;margin-bottom:16px}.hero h1{margin:0;font-size:34px}.hero p{margin:5px 0 0;color:#ddd}.kpi{border:1px solid #e6e6e6;border-radius:14px;padding:14px;background:white}.stButton>button{border-radius:10px;font-weight:700}.status{font-size:22px;font-weight:800}.small{color:#666;font-size:13px}
 </style>''',unsafe_allow_html=True)
@@ -744,6 +847,8 @@ elif pagina=='📊 Semana':
 
 elif pagina=='🕘 Histórico':
     st.header('🕘 Histórico')
+    if 'historico_salvo' in st.session_state:
+        st.success(st.session_state.pop('historico_salvo'))
     df=query('SELECT id,data,turno,operacao,responsavel,status,cargas_realizadas,toneladas_realizadas,veiculos_carregados,veiculos_pendentes,absenteismo,ofensor,observacoes,criado_em FROM passagens ORDER BY id DESC')
     if df.empty: st.info('Sem registros.')
     else:
@@ -755,6 +860,7 @@ elif pagina=='🕘 Histórico':
         st.caption('A data operacional identifica o dia do turno. Registrado em mostra o instante de gravação; horários antigos foram mantidos como armazenados, sem reinterpretar o fuso ou corrigir datas automaticamente.')
         st.dataframe(df_exibir,use_container_width=True,hide_index=True)
         st.download_button('⬇️ Exportar CSV',df_exibir.to_csv(index=False).encode('utf-8-sig'),'historico_passagem.csv','text/csv')
+        editar_historico(df)
         with st.expander('🗑️ Excluir registro'):
             rid=st.number_input('ID do registro',min_value=1,step=1); conf=st.checkbox('Confirmo a exclusão')
             if st.button('Excluir') and conf:

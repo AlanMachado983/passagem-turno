@@ -81,7 +81,10 @@ class OperationalDateTests(unittest.TestCase):
         self.assertEqual(wrapped.lastrowid, 123)
 
     def test_no_automatic_historical_date_migration(self):
-        sqls = [n.value.upper() for n in ast.walk(TREE)
+        automatic = ast.Module(body=[n for n in TREE.body
+                                     if not (isinstance(n, ast.FunctionDef)
+                                             and n.name == 'salvar_edicao_historico')], type_ignores=[])
+        sqls = [n.value.upper() for n in ast.walk(automatic)
                 if isinstance(n, ast.Constant) and isinstance(n.value, str)]
         self.assertFalse(any('UPDATE PASSAGENS' in sql or 'ALTER TABLE PASSAGENS' in sql
                              for sql in sqls))
