@@ -1,7 +1,35 @@
 import os
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
+
+FUSO_OPERACIONAL = ZoneInfo('America/Sao_Paulo')
+
+def agora_operacional():
+    return datetime.now(FUSO_OPERACIONAL)
+
 import pandas as pd
 import streamlit as st
+
+# Data operacional = dia de início do turno; os horários podem se sobrepor.
+HORARIOS_TURNOS = {
+    'T1': ('06:00', '14:20'),
+    'T2': ('14:20', '22:53'),
+    'T3': ('22:35', '06:18'),
+}
+
+def sugerir_data_operacional(turno, instante):
+    """Sugere o início mais recente de T2/T3, inclusive no fechamento atrasado.
+
+    Não recalcula registros persistidos. T1 e escalas 2x2 mantêm a data local.
+    O líder deve confirmar a data; lançamentos de outros dias são manuais.
+    """
+    local = instante.astimezone(FUSO_OPERACIONAL)
+    dia = local.date()
+    if turno in ('T2', 'T3'):
+        inicio = datetime.strptime(HORARIOS_TURNOS[turno][0], '%H:%M').time()
+        if local.time().replace(tzinfo=None) < inicio:
+            dia -= timedelta(days=1)
+    return dia
 
 st.set_page_config(page_title='Passagem de Turno | ADIMAX', page_icon='📦', layout='wide')
 
@@ -18,7 +46,8 @@ class PgCursor:
         if sql.lstrip().upper().startswith('INSERT INTO PASSAGENS') and 'RETURNING' not in sql.upper():
             sql += ' RETURNING id'
             self._cursor.execute(sql, params)
-            self.lastrowid = self._cursor.fetchone()[0]
+            row = self._cursor.fetchone()
+            self.lastrowid = row[0] if row else None
         else:
             self._cursor.execute(sql, params)
         return self
@@ -168,7 +197,7 @@ with st.sidebar:
 if pagina=='📋 Planejamento':
     st.header('📋 Planejamento diário')
     st.caption('Metas diárias de Separação e Carregamento. Ao salvar novamente a mesma data, as metas são atualizadas.')
-    d=st.date_input('Data do planejamento',date.today())
+    d=st.date_input('Data do planejamento',agora_operacional().date())
     st.markdown('#### 📦 Separação')
     sep_plan=st.number_input('Toneladas planejadas de Separação',min_value=0.0,step=1.0,format='%.1f',value=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas'),key=f'sep_{d}')
     st.markdown('#### 🚛 Carregamento')
@@ -177,7 +206,7 @@ if pagina=='📋 Planejamento':
         c=conn()
         try:
             cur=c.cursor()
-            agora=datetime.now().isoformat(timespec='seconds')
+            agora=agora_operacional().isoformat(timespec='seconds')
             for op,indicador,valor in [
                 ('CDA 01 - Separação','Toneladas',sep_plan),
                 ('CDA 01 - Carregamento','Veículos',car_qtd),
@@ -209,7 +238,7 @@ if pagina=='📋 Planejamento':
 elif pagina=='🎯 Planejado do Dia':
     st.header('🎯 Painel de Gestão à Vista')
     st.caption('Logística • fechamento diário para acompanhamento e GDD')
-    d=st.date_input('Data do painel',date.today(),key='data_painel_dia')
+    d=st.date_input('Data do painel',agora_operacional().date(),key='data_painel_dia')
     plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
     plan_car_qtd=scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')
     if plan_sep>=10000: plan_sep=plan_sep/1000.0
@@ -304,7 +333,19 @@ elif pagina=='📝 Nova Passagem':
     a.text_input('Área',value=area,disabled=True)
     b.text_input('Turno',value=turno_nome,disabled=True)
     c.text_input('Responsável',value=supervisor,disabled=True)
-    data_reg=st.date_input('Data',date.today())
+    instante_formulario=agora_operacional()
+    data_sugerida=sugerir_data_operacional(turno,instante_formulario)
+    data_reg=st.date_input(
+        'Data operacional (dia de início do turno)',data_sugerida,
+        key=f'data_operacional_{resp}_{data_sugerida.isoformat()}',
+        help='Data usada no planejamento, nos transbordos e nos painéis. Para lançamento de outro dia, ajuste antes de salvar.')
+    if turno in HORARIOS_TURNOS:
+        inicio,fim=HORARIOS_TURNOS[turno]
+        st.caption(f'{turno_nome}: {inicio} às {fim}. Data sugerida: {data_sugerida.strftime("%d/%m/%Y")}, conforme o início mais recente desse turno.')
+    st.caption('O horário real de registro será gravado separadamente, no fuso America/Sao_Paulo. Registros antigos não serão alterados.')
+    data_confirmada=st.checkbox(
+        f'Confirmo a passagem de {turno_nome} na data operacional {data_reg.strftime("%d/%m/%Y")}',
+        key=f'confirmar_data_{resp}_{data_reg.isoformat()}_{data_sugerida.isoformat()}')
     # Permissões operacionais por líder; a área e o turno permanecem automáticos.
     if area=='CDA 01':
         if resp=='ALISON RIBEIRO DE OLIVEIRA':
@@ -444,6 +485,7 @@ elif pagina=='📝 Nova Passagem':
     st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
     if st.button('💾 Salvar passagem',type='primary',use_container_width=True):
         if not resp.strip(): st.error('Informe o responsável pela passagem.')
+        elif not data_confirmada: st.error('Confirme a data operacional antes de salvar a passagem.')
         elif aus>hc: st.error('Ausências não pode ser maior que o headcount.')
         elif operacao=='CDA 02' and (conf_cc>conf_tc or conf_uc>conf_tu): st.error('A quantidade conferida não pode superar o total.')
         else:
@@ -459,11 +501,15 @@ elif pagina=='📝 Nova Passagem':
             reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
             varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
             conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO UPDATE SET responsavel=EXCLUDED.responsavel, headcount=EXCLUDED.headcount, ausencias=EXCLUDED.ausencias, presentes=EXCLUDED.presentes, absenteismo=EXCLUDED.absenteismo, cargas_realizadas=EXCLUDED.cargas_realizadas, toneladas_realizadas=EXCLUDED.toneladas_realizadas, veiculos_trabalhados=EXCLUDED.veiculos_trabalhados, veiculos_carregados=EXCLUDED.veiculos_carregados, veiculos_pendentes=EXCLUDED.veiculos_pendentes, uz_paletes=EXCLUDED.uz_paletes, pd_espera=EXCLUDED.pd_espera, transbordo_total=EXCLUDED.transbordo_total, toneladas_estoque=EXCLUDED.toneladas_estoque, paletes_estoque=EXCLUDED.paletes_estoque, planejado_cargas=EXCLUDED.planejado_cargas, planejado_ton=EXCLUDED.planejado_ton, planejado_veiculos=EXCLUDED.planejado_veiculos, gap_cargas=EXCLUDED.gap_cargas, gap_ton=EXCLUDED.gap_ton, gap_veiculos=EXCLUDED.gap_veiculos, ating_cargas=EXCLUDED.ating_cargas, ating_ton=EXCLUDED.ating_ton, ating_veiculos=EXCLUDED.ating_veiculos, ofensor=EXCLUDED.ofensor, observacoes=EXCLUDED.observacoes, status=EXCLUDED.status, recebimento_producao_kg=EXCLUDED.recebimento_producao_kg, recebimento_producao_paletes=EXCLUDED.recebimento_producao_paletes, abastecimento_picking_kg=EXCLUDED.abastecimento_picking_kg, abastecimento_picking_paletes=EXCLUDED.abastecimento_picking_paletes, carretas_descarregadas=EXCLUDED.carretas_descarregadas, carretas_armazenadas=EXCLUDED.carretas_armazenadas, carretas_aguardando=EXCLUDED.carretas_aguardando, transbordos_cda02=EXCLUDED.transbordos_cda02, reembalo_enviados=EXCLUDED.reembalo_enviados, reprocesso_enviados=EXCLUDED.reprocesso_enviados, maquinas_paradas=EXCLUDED.maquinas_paradas, equipamento_parado=EXCLUDED.equipamento_parado, problema_equipamento=EXCLUDED.problema_equipamento, pendencias_proximo_turno=EXCLUDED.pendencias_proximo_turno, varejo_cargas=EXCLUDED.varejo_cargas, varejo_ton=EXCLUDED.varejo_ton, transferencias_qtd=EXCLUDED.transferencias_qtd, transferencias_ton=EXCLUDED.transferencias_ton, conf_total_cargas=EXCLUDED.conf_total_cargas, conf_total_uzs=EXCLUDED.conf_total_uzs, conf_erros=EXCLUDED.conf_erros, conf_cargas_conferidas=EXCLUDED.conf_cargas_conferidas, conf_uzs_conferidas=EXCLUDED.conf_uzs_conferidas''',
-            (datetime.now().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
+            (agora_operacional().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
              cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
              receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
              equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc)); pid=cur.lastrowid
+            if pid is None:
+                c.rollback(); c.close()
+                st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
+                st.stop()
             for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
             c.commit();c.close();st.success('Passagem salva com sucesso.')
 
@@ -509,7 +555,7 @@ elif pagina=='👔 Visão do Supervisor':
         st.stop()
     op=supervisores[supervisor]
     st.info('Área sob responsabilidade: '+op)
-    hoje=date.today()
+    hoje=agora_operacional().date()
     ini=hoje-timedelta(days=6)
     c1,c2=st.columns(2)
     di=c1.date_input('Data inicial',ini,key='sup_ini')
@@ -671,7 +717,7 @@ elif pagina=='👔 Visão do Supervisor':
 
 elif pagina=='📊 Semana':
     st.header('📊 Resumo semanal')
-    hoje=date.today(); ini=hoje-timedelta(days=hoje.weekday()); fim=ini+timedelta(days=6)
+    hoje=agora_operacional().date(); ini=hoje-timedelta(days=hoje.weekday()); fim=ini+timedelta(days=6)
     a,b=st.columns(2); di=a.date_input('Início',ini); dfim=b.date_input('Fim',fim)
     df=query('SELECT * FROM passagens WHERE data BETWEEN ? AND ? ORDER BY data',(str(di),str(dfim)))
     if df.empty: st.info('Sem registros no período.')
@@ -705,6 +751,8 @@ elif pagina=='🕘 Histórico':
         df_exibir['toneladas_realizadas']=df_exibir['toneladas_realizadas'].apply(em_toneladas)
         df_exibir['cargas_realizadas']=df_exibir.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
         if 'turno' in df_exibir.columns: df_exibir['turno']=df_exibir['turno'].apply(nome_turno)
+        df_exibir=df_exibir.rename(columns={'data':'Data operacional','criado_em':'Registrado em (data/hora)'})
+        st.caption('A data operacional identifica o dia do turno. Registrado em mostra o instante de gravação; horários antigos foram mantidos como armazenados, sem reinterpretar o fuso ou corrigir datas automaticamente.')
         st.dataframe(df_exibir,use_container_width=True,hide_index=True)
         st.download_button('⬇️ Exportar CSV',df_exibir.to_csv(index=False).encode('utf-8-sig'),'historico_passagem.csv','text/csv')
         with st.expander('🗑️ Excluir registro'):
@@ -714,7 +762,7 @@ elif pagina=='🕘 Histórico':
 
 else:
     st.header('🖨️ Passagem consolidada para impressão')
-    a,b=st.columns(2); d=a.date_input('Data',date.today()); t=b.selectbox('Turno',['T1','T2','T3'])
+    a,b=st.columns(2); d=a.date_input('Data',agora_operacional().date()); t=b.selectbox('Turno',['T1','T2','T3'])
     df=query('SELECT * FROM passagens WHERE data=? AND turno=? ORDER BY operacao',(str(d),t))
     if df.empty: st.info('Não há registros para esta data/turno.')
     else:
