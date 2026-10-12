@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "Passagem de Turno | ADIMAX",
+  "short_name": "Passagem de Turno",
+  "lang": "pt-BR",
+  "description": "Passagem de turno da Logística ADIMAX.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#031b38",
+  "theme_color": "#031b38",
+  "icons": [
+    {
+      "src": "/app/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/app/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
@@ -31,7 +32,9 @@ def sugerir_data_operacional(turno, instante):
             dia -= timedelta(days=1)
     return dia
 
-st.set_page_config(page_title='Passagem de Turno | ADIMAX', page_icon='📦', layout='wide')
+APP_DIR = Path(__file__).resolve().parent
+st.set_page_config(page_title='Passagem de Turno | ADIMAX',
+                   page_icon=str(APP_DIR / 'static' / 'favicon.png'), layout='wide')
 
 # Banco persistente PostgreSQL configurado nos Secrets do Streamlit.
 # Não inclua senhas neste arquivo ou no GitHub.
@@ -293,9 +296,22 @@ st.markdown('''<style>
 st.markdown('<div class="hero"><h1>Passagem de Turno</h1><p>Logística • CDA 01 • CDA 02 • Estoque</p></div>',unsafe_allow_html=True)
 
 with st.sidebar:
+    st.image(str(APP_DIR / 'static' / 'icon-192.png'), width=144)
     st.markdown('## ADIMAX')
     if os.path.exists('assets/caminhoes.png'): st.image('assets/caminhoes.png',use_container_width=True)
     pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','👔 Visão do Supervisor','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
+    with st.expander('📲 Adicionar à tela inicial'):
+        st.markdown(
+            '**Android (Chrome):** abra o menu ⋮ e procure '
+            '“Adicionar à tela inicial” ou “Instalar aplicativo”.\n\n'
+            '**iPhone/iPad (Safari):** toque em Compartilhar e '
+            '“Adicionar à Tela de Início”.\n\n'
+            '**Computador (Chrome/Edge):** no menu do navegador, procure '
+            'a opção para instalar esta página como aplicativo, se disponível.'
+        )
+        st.caption('As opções variam conforme o navegador. O app precisa de internet. '
+                   'O nome e o ícone do atalho podem depender do navegador.')
+
 
 if pagina=='📋 Planejamento':
     st.header('📋 Planejamento diário')

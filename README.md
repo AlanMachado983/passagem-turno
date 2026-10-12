@@ -11,5 +11,7 @@
 ## Publicar no Streamlit
 Suba `app.py`, `requirements.txt` e a pasta `assets` no mesmo repositório. O arquivo principal continua sendo `app.py`.
 
+Inclua também `static/` e `.streamlit/config.toml` para o logo e os ícones. Consulte [INSTALACAO.md](INSTALACAO.md) para adicionar à tela inicial e para as configurações adicionais de uma PWA.
+
 ## Banco
 Esta V3 ainda usa SQLite como modo de teste. No Streamlit Community Cloud o armazenamento local não deve ser tratado como histórico definitivo. Antes do uso com dados reais, conecte um banco persistente aprovado pela empresa.
