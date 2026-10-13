@@ -142,12 +142,19 @@ def nome_turno(turno):
     return {'T1':'1º Turno','T2':'2º Turno','T3':'3º Turno'}.get(str(turno),str(turno))
 
 def em_toneladas(valor):
-    """Converte peso operacional em kg para toneladas; mantém valores já lançados em t."""
+    """Compatibilidade com pesos antigos em kg; valores abaixo de 10.000 são tratados como t."""
     try:
         v=float(valor or 0)
         return v/1000.0 if abs(v)>=10000 else v
     except (TypeError, ValueError):
         return 0.0
+
+def fmt_t(valor):
+    """Exibe toneladas no padrão brasileiro, sempre com uma casa decimal."""
+    return f'{float(valor or 0):,.1f}'.replace(',', 'X').replace('.', ',').replace('X', '.')+' t'
+
+def fmt_qtd(valor):
+    return f'{int(round(float(valor or 0))):,}'.replace(',', '.')
 
 
 def query(sql, params=()):
@@ -415,9 +422,9 @@ elif pagina=='🎯 Planejado do Dia':
     st.markdown('#### Composição da Separação')
     a,b,c,d=st.columns(4)
     a.metric('Cargas Vendas',f'{varejo_q:g}')
-    b.metric('Vendas',f'{varejo_t:.1f} t')
+    b.metric('Vendas',fmt_t(varejo_t))
     c.metric('Transferências',f'{transf_q:g}')
-    d.metric('Transferências',f'{transf_t:.1f} t')
+    d.metric('Transferências',fmt_t(transf_t))
     st.markdown('#### Realizado por turno — Separação')
     cols=st.columns(3)
     for col,t in zip(cols,['T1','T2','T3']):
@@ -496,19 +503,21 @@ elif pagina=='📝 Nova Passagem':
     if operacao=='CDA 01 - Separação':
         pc=0.0; pt=scalar_plan(data_reg,'DIA',operacao,'Toneladas')
         if pt>=10000: pt=pt/1000.0
+        st.caption('Padrão: toneladas (t). Valores antigos lançados em kg são convertidos para exibição; confirme sempre a unidade informada.')
         st.markdown('#### 🛒 Varejo')
         x,y=st.columns(2)
         varejo_cargas=x.number_input('Cargas Vendas',min_value=0.0,step=1.0)
-        varejo_ton=y.number_input('Toneladas Vendas',min_value=0.0,step=0.1,format='%.1f')
+        varejo_ton=y.number_input('Toneladas Vendas (t)',min_value=0.0,step=0.1,format='%.1f',help='Informe em toneladas. Ex.: 163,2 t, não 163.200 kg.')
         st.markdown('#### 🔄 Transferências')
         x,y=st.columns(2)
         transferencias_qtd=x.number_input('Quantidade de Transferências',min_value=0.0,step=1.0)
-        transferencias_ton=y.number_input('Toneladas de Transferências',min_value=0.0,step=0.1,format='%.1f')
+        transferencias_ton=y.number_input('Toneladas de Transferências (t)',min_value=0.0,step=0.1,format='%.1f',help='Informe em toneladas. Ex.: 67,9 t, não 67.900 kg.')
         cargas=varejo_cargas+transferencias_qtd
+        varejo_ton=em_toneladas(varejo_ton); transferencias_ton=em_toneladas(transferencias_ton)
         ton=varejo_ton+transferencias_ton
         t1,t2=st.columns(2)
         t1.metric('Total operações separadas',f'{cargas:g}')
-        t2.metric('Total separado no turno',f'{ton:.1f} t')
+        t2.metric('Total separado no turno',fmt_t(ton))
         st.info(f'Planejado diário da Separação: {pt:.1f} t' if pt else 'Planejamento diário ainda não cadastrado.')
         n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1))
         for i in range(n):
@@ -760,19 +769,19 @@ elif pagina=='👔 Visão do Supervisor':
             c.metric('Paletes abastecidos',f"{dados['abastecimento_picking_paletes'].sum():g}")
         else:
             b.metric('Veículos carregados' if op=='CDA 01 - Carregamento' else 'Cargas',f"{dados['Movimentos'].sum():g}")
-            c.metric('Toneladas',f"{dados['Volume_t'].sum():.1f} t")
+            c.metric('Toneladas',fmt_t(dados['Volume_t'].sum()))
         d.metric('Absenteísmo',f'{total_aus/total_hc*100:.1f}%' if total_hc else '—')
         st.markdown('#### Detalhamento da operação')
         if op=='CDA 01 - Separação':
             a,b,c,d=st.columns(4)
             a.metric('Cargas de vendas',f"{dados['varejo_cargas'].sum():g}")
-            b.metric('Toneladas de vendas',f"{dados['varejo_ton'].sum():.1f} t")
+            b.metric('Toneladas de vendas',fmt_t(sum(em_toneladas(v) for v in dados['varejo_ton'])))
             c.metric('Transferências',f"{dados['transferencias_qtd'].sum():g}")
-            d.metric('Toneladas transferidas',f"{dados['transferencias_ton'].sum():.1f} t")
+            d.metric('Toneladas transferidas',fmt_t(sum(em_toneladas(v) for v in dados['transferencias_ton'])))
         elif op=='CDA 01 - Carregamento':
             a,b,c=st.columns(3)
             a.metric('Veículos carregados',f"{dados['veiculos_carregados'].sum():g}")
-            b.metric('Toneladas carregadas',f"{dados['Volume_t'].sum():.1f} t")
+            b.metric('Toneladas carregadas',fmt_t(dados['Volume_t'].sum()))
             c.metric('Veículos pendentes',f"{dados['veiculos_pendentes'].sum():g}")
         elif op=='CDA 02':
             a,b,c,d=st.columns(4)
