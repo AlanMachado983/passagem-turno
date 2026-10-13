@@ -251,28 +251,34 @@ def mostrar_resumo_whatsapp(rid):
     st.link_button('🟢 Enviar pelo WhatsApp','https://api.whatsapp.com/send?text='+urllib.parse.quote(mensagem))
 
 def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
-    """Salva uma correção explícita e sua versão anterior na mesma transação."""
+    """Atualiza a passagem e registra a versão anterior atomicamente."""
     import json
-    permitidos={'data','turno','responsavel','ofensor','observacoes','status'}
+    permitidos={'data','turno','responsavel','ofensor','observacoes','status',
+                'cargas_realizadas','toneladas_realizadas','varejo_cargas',
+                'varejo_ton','transferencias_qtd','transferencias_ton',
+                'veiculos_carregados','veiculos_pendentes','uz_paletes',
+                'pd_espera','conf_total_cargas','conf_total_uzs',
+                'conf_cargas_conferidas','conf_uzs_conferidas','conf_erros'}
     if not alteracoes or not set(alteracoes).issubset(permitidos):
         raise ValueError('Campos de edição inválidos.')
     if not autor.strip() or not motivo.strip():
-        raise ValueError('Informe quem está corrigindo e o motivo.')
+        raise ValueError('Informe o autor e o motivo da correção.')
     c=conn()
     try:
         cur=c.cursor()
         cur.execute('SELECT to_jsonb(p)::text FROM passagens p WHERE id=? FOR UPDATE',(int(rid),))
         row=cur.fetchone()
         if not row:
-            raise ValueError('O registro não existe mais.')
+            raise ValueError('Registro não encontrado.')
         anterior=json.loads(row[0])
         if anterior!=original:
-            raise ValueError('Este registro foi alterado por outra pessoa. Recarregue e revise antes de salvar.')
+            raise ValueError('O registro foi modificado. Recarregue antes de corrigir.')
         if anterior['operacao']=='CDA 02':
             cur.execute("SELECT id FROM passagens WHERE data=? AND turno=? AND area=? AND operacao=? AND id<>?",
-                        (alteracoes['data'],alteracoes['turno'],anterior['area'],anterior['operacao'],int(rid)))
+                        (alteracoes.get('data',anterior['data']),alteracoes.get('turno',anterior['turno']),
+                         anterior['area'],anterior['operacao'],int(rid)))
             if cur.fetchone():
-                raise ValueError('Já existe uma passagem CDA 02 na data e turno escolhidos. Nenhum registro foi alterado.')
+                raise ValueError('Já existe uma passagem CDA 02 para a data e turno selecionados.')
         cur.execute("""CREATE TABLE IF NOT EXISTS passagens_revisoes (
             id BIGSERIAL PRIMARY KEY, passagem_id BIGINT NOT NULL,
             alterado_em TIMESTAMPTZ NOT NULL, autor TEXT NOT NULL,
@@ -295,10 +301,10 @@ def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
 
 def editar_historico(df):
     import json
-    with st.expander('✏️ Modificar registro'):
-        st.caption('Selecione a passagem. A data/hora original será mantida; cada correção guarda a versão anterior, o autor e o motivo.')
+    with st.expander('✏️ Modificar registro do histórico'):
+        st.caption('Corrija lançamentos sem excluir o histórico. Toda alteração exige autor e motivo e preserva os dados anteriores.')
         opcoes={int(r.id):f"ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao} • {r.responsavel}" for r in df.itertuples()}
-        rid=st.selectbox('Registro para modificar',list(opcoes),format_func=lambda x:opcoes[x],index=None,placeholder='Selecione uma passagem')
+        rid=st.selectbox('Passagem para corrigir',list(opcoes),format_func=lambda x:opcoes[x],index=None,placeholder='Selecione o registro')
         if rid is None:
             return
         chave=f'historico_original_{rid}'
@@ -309,44 +315,86 @@ def editar_historico(df):
                 return
             st.session_state[chave]=json.loads(registro.iloc[0]['registro'])
         original=st.session_state[chave]
+        op=original['operacao']
+        def num(campo):
+            return float(original.get(campo) or 0)
         with st.form(f'editar_passagem_{rid}'):
+            st.markdown(f"**{op} — {nome_turno(original['turno'])} — ID {rid}**")
             nova_data=st.date_input('Data operacional',date.fromisoformat(str(original['data'])[:10]))
-            turnos=['T1','T2','T3'] if original['operacao']!='Estoque' else ['2X2 1A','2X2 1B','2X2 2A','2X2 2B']
-            if original['turno'] not in turnos:
-                turnos.append(original['turno'])
+            turnos=['T1','T2','T3'] if op!='Estoque' else ['2X2 1A','2X2 1B','2X2 2A','2X2 2B']
+            if original['turno'] not in turnos: turnos.append(original['turno'])
             novo_turno=st.selectbox('Turno',turnos,index=turnos.index(original['turno']),format_func=nome_turno)
-            responsavel=st.text_input('Líder / responsável',value=original.get('responsavel') or '')
+            responsavel=st.text_input('Líder',value=original.get('responsavel') or '')
             ofensor=st.text_input('Ofensor',value=original.get('ofensor') or 'Sem ofensor')
-            observacoes=st.text_area('Observações / detalhes',value=original.get('observacoes') or '',height=220)
+            observacoes=st.text_area('Observações',value=original.get('observacoes') or '')
             estados=['🟢 Normal','🟡 Atenção','🔴 Crítico']
-            if original['status'] not in estados:
-                estados.append(original['status'])
+            if original['status'] not in estados: estados.append(original['status'])
             status=st.selectbox('Status',estados,index=estados.index(original['status']))
-            st.caption(f"Operação: {original['operacao']} • Registro original: {original['criado_em']}")
-            autor=st.text_input('Quem está fazendo a correção?')
-            motivo=st.text_area('Motivo da correção')
-            confirmar=st.checkbox('Confirmo a alteração deste registro')
-            salvar=st.form_submit_button('💾 Salvar alteração',type='primary')
+            alteracoes={'data':nova_data.isoformat(),'turno':novo_turno,'responsavel':responsavel.strip(),
+                        'ofensor':ofensor.strip() or 'Sem ofensor','observacoes':observacoes,'status':status}
+            if op=='CDA 01 - Separação':
+                st.markdown('#### Separação — corrija vendas e transferências')
+                st.caption('Os totais de cargas e toneladas são calculados automaticamente a partir dos campos abaixo.')
+                a1,a2=st.columns(2)
+                vendas_cargas=a1.number_input('Cargas Vendas',min_value=0.0,value=num('varejo_cargas'),step=1.0,format='%.0f')
+                vendas_ton=a2.number_input('Toneladas Vendas (t)',min_value=0.0,value=em_toneladas(num('varejo_ton')),step=0.1)
+                b1,b2=st.columns(2)
+                transf_cargas=b1.number_input('Quantidade de transferências',min_value=0.0,value=num('transferencias_qtd'),step=1.0,format='%.0f')
+                transf_ton=b2.number_input('Toneladas de transferências (t)',min_value=0.0,value=em_toneladas(num('transferencias_ton')),step=0.1)
+                total_cargas=vendas_cargas+transf_cargas
+                total_ton=vendas_ton+transf_ton
+                st.info(f'Total corrigido: {total_cargas:.0f} cargas e {total_ton:.1f} toneladas.')
+                alteracoes.update(varejo_cargas=vendas_cargas,varejo_ton=vendas_ton,
+                                  transferencias_qtd=transf_cargas,transferencias_ton=transf_ton,
+                                  cargas_realizadas=total_cargas,toneladas_realizadas=total_ton)
+            elif op=='CDA 01 - Carregamento':
+                a1,a2,a3=st.columns(3)
+                veiculos=a1.number_input('Veículos carregados',min_value=0.0,value=num('veiculos_carregados'),step=1.0)
+                toneladas=a2.number_input('Toneladas carregadas (t)',min_value=0.0,value=em_toneladas(num('toneladas_realizadas')),step=0.1)
+                pendentes=a3.number_input('Veículos pendentes',min_value=0.0,value=num('veiculos_pendentes'),step=1.0)
+                alteracoes.update(veiculos_carregados=veiculos,toneladas_realizadas=toneladas,veiculos_pendentes=pendentes)
+            elif op=='CDA 02':
+                a1,a2,a3=st.columns(3)
+                cargas=a1.number_input('Cargas separadas',min_value=0.0,value=num('cargas_realizadas'),step=1.0)
+                uz=a2.number_input('Paletes / UZs separados',min_value=0.0,value=num('uz_paletes'),step=1.0)
+                espera=a3.number_input('P&D espera',min_value=0.0,value=num('pd_espera'),step=1.0)
+                st.markdown('#### Conferência')
+                b1,b2=st.columns(2)
+                tc=b1.number_input('Total de cargas',min_value=0,value=int(num('conf_total_cargas')))
+                cc=b2.number_input('Cargas conferidas',min_value=0,value=int(num('conf_cargas_conferidas')))
+                b3,b4=st.columns(2)
+                tu=b3.number_input('Total de UZs',min_value=0,value=int(num('conf_total_uzs')))
+                uc=b4.number_input('UZs conferidas',min_value=0,value=int(num('conf_uzs_conferidas')))
+                erros=st.number_input('Erros de conferência',min_value=0,value=int(num('conf_erros')))
+                alteracoes.update(cargas_realizadas=cargas,uz_paletes=uz,pd_espera=espera,
+                                  conf_total_cargas=tc,conf_cargas_conferidas=cc,
+                                  conf_total_uzs=tu,conf_uzs_conferidas=uc,conf_erros=erros)
+            st.caption('O horário original de registro será preservado.')
+            autor=st.text_input('Seu nome (quem está corrigindo)')
+            motivo=st.text_area('Motivo da correção',placeholder='Ex.: erro de digitação de cargas e toneladas')
+            confirmar=st.checkbox('Confirmo que conferi os valores corrigidos')
+            salvar=st.form_submit_button('💾 Salvar correção',type='primary')
         if salvar:
             if not confirmar:
-                st.error('Confirme a alteração antes de salvar.')
-            elif not responsavel.strip():
-                st.error('Informe o líder / responsável.')
+                st.error('Confirme os valores antes de salvar.')
+            elif not responsavel.strip() or not autor.strip() or not motivo.strip():
+                st.error('Preencha líder, autor e motivo.')
+            elif op=='CDA 02' and (alteracoes['conf_cargas_conferidas']>alteracoes['conf_total_cargas'] or alteracoes['conf_uzs_conferidas']>alteracoes['conf_total_uzs']):
+                st.error('Conferidos não podem superar o total.')
             else:
-                alteracoes={'data':nova_data.isoformat(),'turno':novo_turno,'responsavel':responsavel.strip(),
-                            'ofensor':ofensor.strip() or 'Sem ofensor','observacoes':observacoes,'status':status}
-                if all(str(original.get(k) or '')==str(v) for k,v in alteracoes.items()):
-                    st.info('Nenhum campo foi modificado.')
+                modificados={k:v for k,v in alteracoes.items() if str(original.get(k) or '')!=str(v)}
+                if not modificados:
+                    st.info('Nenhum valor foi alterado.')
                 else:
                     try:
-                        salvar_edicao_historico(rid,original,alteracoes,autor,motivo)
+                        salvar_edicao_historico(rid,original,modificados,autor,motivo)
                     except ValueError as erro:
                         st.error(str(erro))
                     except Exception:
-                        st.error('Não foi possível salvar. Nenhuma alteração foi aplicada. Verifique a conexão e a permissão para criar a tabela de revisões.')
+                        st.error('Não foi possível salvar a correção. Nenhuma alteração foi confirmada. Verifique a conexão e a permissão de auditoria.')
                     else:
                         del st.session_state[chave]
-                        st.session_state['historico_salvo']='Alteração salva. A versão anterior e o horário original foram preservados.'
+                        st.session_state['historico_salvo']='Correção salva. Valores anteriores preservados na auditoria.'
                         st.rerun()
         if st.button('Recarregar registro selecionado',key=f'recarregar_{rid}'):
             del st.session_state[chave]
@@ -978,7 +1026,8 @@ elif pagina=='🕘 Histórico':
             selecionado=st.selectbox('Passagem para compartilhar',list(opcoes),index=None,format_func=lambda x:opcoes[x],key='historico_whatsapp')
             if selecionado is not None:
                 mostrar_resumo_whatsapp(selecionado)
-        st.info('🔒 Correção e exclusão de registros temporariamente desativadas durante a entrada em produção. Os registros continuam disponíveis para consulta, exportação e compartilhamento.')
+        editar_historico(df)
+        st.caption('🔒 Exclusão de registros permanece desativada para proteger o histórico operacional.')
 
 else:
     st.header('🖨️ Passagem consolidada para impressão')
