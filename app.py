@@ -133,6 +133,27 @@ def consultar_fluxo_transbordos(data_ref, turno_ref):
 
 def conn(): return PgConnection()
 
+@st.cache_resource(show_spinner=False)
+def garantir_campos_efetivo():
+    """Migração idempotente para registros antigos e novas correções."""
+    c=conn()
+    try:
+        cur=c.cursor()
+        cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS ferias INTEGER NOT NULL DEFAULT 0')
+        cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS afastamentos INTEGER NOT NULL DEFAULT 0')
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
+
+try:
+    garantir_campos_efetivo()
+except Exception:
+    st.error('Não foi possível preparar os campos de efetivo no banco. Os registros foram preservados; solicite verificação da permissão de alteração da tabela.')
+    st.stop()
+
 LIDERES = {
     "ALISON RIBEIRO DE OLIVEIRA": ("CDA 01", "ANDRE FORTUNATO", "T1"),
     "ANDERSON DE MELO ALMEIDA": ("CDA 01", "ANDRE FORTUNATO", "T3"),
