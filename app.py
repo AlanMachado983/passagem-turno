@@ -655,7 +655,7 @@ elif pagina=='📝 Nova Passagem':
         cm1.metric('Cargas conferidas',conf_cc)
         cm2.metric('% cargas conferidas',f'{pct(conf_cc,conf_tc):.1f}%' if conf_tc else '—')
         cm3.metric('% UZs conferidas',f'{pct(conf_uc,conf_tu):.1f}%' if conf_tu else '—')
-        st.caption('Se já houver passagem para esta data e turno, o salvamento atualizará o registro existente.')
+        st.caption('Uma passagem CDA 02 por data e turno. Se já existir, consulte o Histórico; o registro anterior não será sobrescrito.')
 
     else:
         st.markdown('### 🏭 Indicadores principais')
@@ -709,32 +709,41 @@ elif pagina=='📝 Nova Passagem':
         elif aus>hc: st.error('Ausências não pode ser maior que o headcount.')
         elif operacao=='CDA 02' and (conf_cc>conf_tc or conf_uc>conf_tu): st.error('A quantidade conferida não pode superar o total.')
         else:
-            c=conn();cur=c.cursor()
-            cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS cargas_aguardando_caixas_cda02 INTEGER NOT NULL DEFAULT 0')
-            cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS cargas_em_pd INTEGER NOT NULL DEFAULT 0')
-            cur.execute('''INSERT INTO passagens(
-            criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
-            cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
-            uz_paletes,pd_espera,transbordo_total,toneladas_estoque,paletes_estoque,
-            planejado_cargas,planejado_ton,planejado_veiculos,gap_cargas,gap_ton,gap_veiculos,
-            ating_cargas,ating_ton,ating_veiculos,ofensor,observacoes,status,
-            recebimento_producao_kg,recebimento_producao_paletes,abastecimento_picking_kg,abastecimento_picking_paletes,
-            carretas_descarregadas,carretas_armazenadas,carretas_aguardando,transbordos_cda02,
-            reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
-            varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
-            conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas,
-            cargas_aguardando_caixas_cda02,cargas_em_pd
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
-            (agora_operacional().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
-             cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
-             receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
-             equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd)); pid=cur.lastrowid
-            if pid is None:
-                c.rollback(); c.close()
-                st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
-                st.stop()
-            for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
-            c.commit();c.close();st.session_state['ultima_passagem_whats']=int(pid);st.success('Passagem salva com sucesso.')
+            c=None
+            try:
+                c=conn();cur=c.cursor()
+                cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS cargas_aguardando_caixas_cda02 INTEGER NOT NULL DEFAULT 0')
+                cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS cargas_em_pd INTEGER NOT NULL DEFAULT 0')
+                cur.execute('''INSERT INTO passagens(
+                criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
+                cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
+                uz_paletes,pd_espera,transbordo_total,toneladas_estoque,paletes_estoque,
+                planejado_cargas,planejado_ton,planejado_veiculos,gap_cargas,gap_ton,gap_veiculos,
+                ating_cargas,ating_ton,ating_veiculos,ofensor,observacoes,status,
+                recebimento_producao_kg,recebimento_producao_paletes,abastecimento_picking_kg,abastecimento_picking_paletes,
+                carretas_descarregadas,carretas_armazenadas,carretas_aguardando,transbordos_cda02,
+                reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
+                varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
+                conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas,
+                cargas_aguardando_caixas_cda02,cargas_em_pd
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
+                (agora_operacional().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
+                 cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
+                 receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
+                 equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd)); pid=cur.lastrowid
+                if pid is None:
+                    c.rollback()
+                    st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
+                    st.stop()
+                for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
+                c.commit();st.session_state['ultima_passagem_whats']=int(pid);st.success('Passagem salva com sucesso.')
+            except Exception:
+                if c is not None:
+                    c.rollback()
+                st.error('Não foi possível salvar a passagem. Nenhum registro foi confirmado. Verifique a conexão e tente novamente; se persistir, acione a liderança.')
+            finally:
+                if c is not None:
+                    c.close()
 
 
     if st.session_state.get('ultima_passagem_whats'):
@@ -993,11 +1002,7 @@ elif pagina=='🕘 Histórico':
             selecionado=st.selectbox('Passagem para compartilhar',list(opcoes),index=None,format_func=lambda x:opcoes[x],key='historico_whatsapp')
             if selecionado is not None:
                 mostrar_resumo_whatsapp(selecionado)
-        editar_historico(df)
-        with st.expander('🗑️ Excluir registro'):
-            rid=st.number_input('ID do registro',min_value=1,step=1); conf=st.checkbox('Confirmo a exclusão')
-            if st.button('Excluir') and conf:
-                c=conn();cur=c.cursor();cur.execute('DELETE FROM passagens WHERE id=?',(rid,));c.commit();c.close();st.success('Registro excluído.');st.rerun()
+        st.info('🔒 Correção e exclusão de registros temporariamente desativadas durante a entrada em produção. Os registros continuam disponíveis para consulta, exportação e compartilhamento.')
 
 else:
     st.header('🖨️ Passagem consolidada para impressão')
