@@ -36,6 +36,34 @@ APP_DIR = Path(__file__).resolve().parent
 st.set_page_config(page_title='Passagem de Turno | ADIMAX',
                    page_icon=str(APP_DIR / 'static' / 'favicon.png'), layout='wide')
 
+
+# Personaliza os metadados de instalação quando o navegador permitir.
+# Não interfere na autenticação, no banco ou na integração com o Vira 360.
+try:
+    st.html("""
+    <script>
+    (() => {
+      const head = document.head;
+      const manifest = '/app/static/manifest.webmanifest';
+      let link = head.querySelector('link[rel="manifest"]');
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'manifest';
+        head.appendChild(link);
+      }
+      link.href = manifest;
+      const touch = document.querySelector('link[rel="apple-touch-icon"]') || document.createElement('link');
+      touch.rel = 'apple-touch-icon';
+      touch.href = '/app/static/icon-192.png';
+      if (!touch.parentNode) head.appendChild(touch);
+      document.title = 'Passagem de Turno | ADIMAX';
+    })();
+    </script>
+    """, unsafe_allow_javascript=True)
+except (TypeError, AttributeError):
+    # Versões anteriores do Streamlit não executam JS em st.html.
+    pass
+
 # Banco persistente PostgreSQL configurado nos Secrets do Streamlit.
 # Não inclua senhas neste arquivo ou no GitHub.
 import psycopg2
