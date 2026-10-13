@@ -281,6 +281,12 @@ def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
                 'veiculos_carregados','veiculos_pendentes','uz_paletes',
                 'headcount','ferias','afastamentos','ausencias','presentes','absenteismo',
                 'pd_espera','conf_total_cargas','conf_total_uzs',
+                'recebimento_producao_kg','recebimento_producao_paletes',
+                'abastecimento_picking_kg','abastecimento_picking_paletes',
+                'carretas_descarregadas','carretas_armazenadas','carretas_aguardando',
+                'transbordos_cda02','reembalo_enviados','reprocesso_enviados',
+                'maquinas_paradas','equipamento_parado','problema_equipamento',
+                'pendencias_proximo_turno','toneladas_estoque','paletes_estoque',
                 'conf_cargas_conferidas','conf_uzs_conferidas','conf_erros'}
     if not alteracoes or not set(alteracoes).issubset(permitidos):
         raise ValueError('Campos de edição inválidos.')
@@ -412,6 +418,35 @@ def editar_historico(df):
                 alteracoes.update(cargas_realizadas=cargas,uz_paletes=uz,pd_espera=espera,
                                   conf_total_cargas=tc,conf_cargas_conferidas=cc,
                                   conf_total_uzs=tu,conf_uzs_conferidas=uc,conf_erros=erros)
+            elif op=='Estoque':
+                st.markdown('#### Recebimento da Produção')
+                e1,e2=st.columns(2)
+                receb_kg=e1.number_input('Recebimento da Produção (kg)',min_value=0.0,value=num('recebimento_producao_kg'),step=100.0)
+                receb_pal=e2.number_input('Paletes recebidos da Produção',min_value=0.0,value=num('recebimento_producao_paletes'),step=1.0)
+                st.markdown('#### Abastecimento do Picking')
+                e3,e4=st.columns(2)
+                abast_kg=e3.number_input('Abastecimento do Picking (kg)',min_value=0.0,value=num('abastecimento_picking_kg'),step=100.0)
+                abast_pal=e4.number_input('Paletes abastecidos no Picking',min_value=0.0,value=num('abastecimento_picking_paletes'),step=1.0)
+                st.markdown('#### Movimentações e tarefas')
+                e5,e6,e7,e8=st.columns(4)
+                desc=int(e5.number_input('Carretas descarregadas',min_value=0,value=int(num('carretas_descarregadas'))))
+                arm=int(e6.number_input('Carretas armazenadas',min_value=0,value=int(num('carretas_armazenadas'))))
+                aguard=int(e7.number_input('Carretas aguardando',min_value=0,value=int(num('carretas_aguardando'))))
+                trans=int(e8.number_input('Transbordos para CDA 02',min_value=0,value=int(num('transbordos_cda02'))))
+                e9,e10,e11=st.columns(3)
+                reemb=int(e9.number_input('Reembalo enviados',min_value=0,value=int(num('reembalo_enviados'))))
+                reproc=int(e10.number_input('Reprocesso enviados',min_value=0,value=int(num('reprocesso_enviados'))))
+                maquinas=int(e11.number_input('Máquinas paradas',min_value=0,value=int(num('maquinas_paradas'))))
+                equip=st.text_input('Equipamento / máquina',value=original.get('equipamento_parado') or '')
+                problema=st.text_input('Problema do equipamento',value=original.get('problema_equipamento') or '')
+                pend_prox=st.text_area('Pendências para o próximo turno',value=original.get('pendencias_proximo_turno') or '')
+                alteracoes.update(recebimento_producao_kg=receb_kg,recebimento_producao_paletes=receb_pal,
+                                  abastecimento_picking_kg=abast_kg,abastecimento_picking_paletes=abast_pal,
+                                  carretas_descarregadas=desc,carretas_armazenadas=arm,carretas_aguardando=aguard,
+                                  transbordos_cda02=trans,reembalo_enviados=reemb,reprocesso_enviados=reproc,
+                                  maquinas_paradas=maquinas,equipamento_parado=equip,
+                                  problema_equipamento=problema,pendencias_proximo_turno=pend_prox,
+                                  toneladas_estoque=receb_kg/1000.0,paletes_estoque=receb_pal)
             st.caption('O horário original de registro será preservado.')
             autor=st.text_input('Seu nome (quem está corrigindo)')
             motivo=st.text_area('Motivo da correção',placeholder='Ex.: erro de digitação de cargas e toneladas')
