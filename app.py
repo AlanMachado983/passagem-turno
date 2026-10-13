@@ -498,6 +498,8 @@ elif pagina=='📝 Nova Passagem':
     equip_parado=problema_equip=pend_prox=''
     pc=pt=pv=0.0
     pend=[]
+    cargas_aguardando_caixas=0
+    cargas_em_pd=0
     conf_tc=conf_tu=conf_er=conf_cc=conf_uc=None
     st.subheader('📦 Resultado do turno')
     if operacao=='CDA 01 - Separação':
@@ -519,6 +521,11 @@ elif pagina=='📝 Nova Passagem':
         t1.metric('Total operações separadas',f'{cargas:g}')
         t2.metric('Total separado no turno',fmt_t(ton))
         st.info(f'Planejado diário da Separação: {pt:.1f} t' if pt else 'Planejamento diário ainda não cadastrado.')
+        st.markdown('#### ⏳ Cargas aguardando / P&D')
+        p1,p2=st.columns(2)
+        cargas_aguardando_caixas=int(p1.number_input('Cargas aguardando caixas do CDA 02',min_value=0,step=1,key='sep_aguardando_caixas'))
+        cargas_em_pd=int(p2.number_input('Cargas em P&D',min_value=0,step=1,key='sep_cargas_em_pd'))
+        st.caption('Pendências no fechamento; não entram na produtividade de cargas separadas.')
         n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1))
         for i in range(n):
             st.markdown(f'**Pendência {i+1}**'); q1,q2,q3=st.columns(3); cg=q1.text_input('Carga',key=f'pcg{i}'); cli=q2.text_input('Cliente',key=f'pcl{i}'); sit=q3.selectbox('Situação',['P&D','Separação não iniciada','Em separação','Aguardando produto','Outra'],key=f'psi{i}'); q4,q5=st.columns(2); mot=q4.selectbox('Motivo',['Falta de produto','Sistema/Integração','Mão de obra','Equipamento','Qualidade','Operacional','Outro'],key=f'pmo{i}'); det=q5.text_input('Detalhe',key=f'pde{i}'); pend.append((cg,cli,sit,mot,det))
@@ -618,6 +625,8 @@ elif pagina=='📝 Nova Passagem':
         elif operacao=='CDA 02' and (conf_cc>conf_tc or conf_uc>conf_tu): st.error('A quantidade conferida não pode superar o total.')
         else:
             c=conn();cur=c.cursor()
+            cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS cargas_aguardando_caixas_cda02 INTEGER NOT NULL DEFAULT 0')
+            cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS cargas_em_pd INTEGER NOT NULL DEFAULT 0')
             cur.execute('''INSERT INTO passagens(
             criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
             cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
@@ -628,12 +637,13 @@ elif pagina=='📝 Nova Passagem':
             carretas_descarregadas,carretas_armazenadas,carretas_aguardando,transbordos_cda02,
             reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
             varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
-            conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
+            conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas,
+            cargas_aguardando_caixas_cda02,cargas_em_pd
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
             (agora_operacional().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
              cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
              receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
-             equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc)); pid=cur.lastrowid
+             equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd)); pid=cur.lastrowid
             if pid is None:
                 c.rollback(); c.close()
                 st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
@@ -778,6 +788,11 @@ elif pagina=='👔 Visão do Supervisor':
             b.metric('Toneladas de vendas',fmt_t(sum(em_toneladas(v) for v in dados['varejo_ton'])))
             c.metric('Transferências',f"{dados['transferencias_qtd'].sum():g}")
             d.metric('Toneladas transferidas',fmt_t(sum(em_toneladas(v) for v in dados['transferencias_ton'])))
+            st.markdown('##### ⏳ Pendências de Separação')
+            if 'cargas_aguardando_caixas_cda02' in dados.columns and 'cargas_em_pd' in dados.columns:
+                p1,p2=st.columns(2)
+                p1.metric('Aguardando caixas CDA 02',fmt_qtd(dados['cargas_aguardando_caixas_cda02'].sum()))
+                p2.metric('Cargas em P&D',fmt_qtd(dados['cargas_em_pd'].sum()))
         elif op=='CDA 01 - Carregamento':
             a,b,c=st.columns(3)
             a.metric('Veículos carregados',f"{dados['veiculos_carregados'].sum():g}")
