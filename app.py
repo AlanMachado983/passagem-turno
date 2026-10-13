@@ -141,6 +141,8 @@ def garantir_campos_efetivo():
         cur=c.cursor()
         cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS ferias INTEGER NOT NULL DEFAULT 0')
         cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS afastamentos INTEGER NOT NULL DEFAULT 0')
+        cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS folgas INTEGER NOT NULL DEFAULT 0')
+        cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS atestados INTEGER NOT NULL DEFAULT 0')
         c.commit()
     except Exception:
         c.rollback()
@@ -252,9 +254,9 @@ def resumo_whatsapp(r,pend):
         for _,p in pend.iterrows():
             campos=[str(p.get(k) or '').strip() for k in ('carga','cliente','situacao','motivo','descricao')]
             m.append('• '+' | '.join(x for x in campos if x))
-    hc=float(v('headcount'));au=float(v('ausencias'));ferias=float(v('ferias'));afast=float(v('afastamentos'))
-    hc_base=max(hc-ferias-afast,0)
-    m += ['','👥 *EQUIPE*',f'• Headcount: {q("headcount")}',f'• Férias: {fmt_qtd(ferias)}',f'• Afastamentos: {fmt_qtd(afast)}',f'• Efetivo considerado: {fmt_qtd(hc_base)}',f'• Presentes: {q("presentes")}',f'• Ausências: {q("ausencias")}',f'• Absenteísmo: {pct(au,hc_base):.1f}%' if hc_base else '• Absenteísmo: não informado','','⚠️ *PRINCIPAL OFENSOR*',str(v('ofensor','Sem ofensor')),'','📝 *OBSERVAÇÕES*',str(v('observacoes','Sem observações') or 'Sem observações')]
+    hc=float(v('headcount'));au=float(v('ausencias'));ferias=float(v('ferias'));afast=float(v('afastamentos'));folgas_v=float(v('folgas'));atest_v=float(v('atestados'))
+    hc_base=max(hc-ferias-afast-folgas_v,0)
+    m += ['','👥 *EQUIPE*',f'• Headcount: {q("headcount")}',f'• Férias: {fmt_qtd(ferias)}',f'• Afastamentos: {fmt_qtd(afast)}',f'• Folgas: {fmt_qtd(folgas_v)}',f'• Atestados: {fmt_qtd(atest_v)}',f'• Efetivo considerado: {fmt_qtd(hc_base)}',f'• Presentes: {q("presentes")}',f'• Ausências: {q("ausencias")}',f'• Absenteísmo: {pct(au+atest_v,hc_base):.1f}%' if hc_base else '• Absenteísmo: não informado','','⚠️ *PRINCIPAL OFENSOR*',str(v('ofensor','Sem ofensor')),'','📝 *OBSERVAÇÕES*',str(v('observacoes','Sem observações') or 'Sem observações')]
     if op=='Estoque' and str(v('pendencias_proximo_turno','')).strip(): m += ['','⏭️ *PRÓXIMO TURNO*',str(v('pendencias_proximo_turno'))]
     m += ['',f'🚦 *STATUS:* {v("status","")}', '━━━━━━━━━━━━━━━━━━━━','✅ Registrado no Passagem de Turno | ADIMAX']
     return '\n'.join(m)
@@ -279,7 +281,7 @@ def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
                 'cargas_realizadas','toneladas_realizadas','varejo_cargas',
                 'varejo_ton','transferencias_qtd','transferencias_ton',
                 'veiculos_carregados','veiculos_pendentes','uz_paletes',
-                'headcount','ferias','afastamentos','ausencias','presentes','absenteismo',
+                'headcount','ferias','afastamentos','folgas','atestados','ausencias','presentes','absenteismo',
                 'pd_espera','conf_total_cargas','conf_total_uzs',
                 'recebimento_producao_kg','recebimento_producao_paletes',
                 'abastecimento_picking_kg','abastecimento_picking_paletes',
@@ -304,7 +306,7 @@ def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
         # Ignore somente a diferença entre campos novos ausentes no snapshot
         # e seus valores padrão zero; alterações reais continuam bloqueadas.
         original_completo=dict(original)
-        for campo in ('ferias','afastamentos'):
+        for campo in ('ferias','afastamentos','folgas','atestados'):
             if campo not in original_completo and anterior.get(campo)==0:
                 original_completo[campo]=0
         if anterior!=original_completo:
@@ -375,12 +377,15 @@ def editar_historico(df):
             c3,c4=st.columns(2)
             afast_corr=int(c3.number_input('Afastamentos',min_value=0,value=int(num('afastamentos')),step=1))
             faltas_corr=int(c4.number_input('Faltas',min_value=0,value=int(num('ausencias')),step=1))
-            efetivo_corr=max(0,hc_corr-ferias_corr-afast_corr)
-            presentes_corr=max(0,efetivo_corr-faltas_corr)
-            abs_corr=round(100*faltas_corr/efetivo_corr,2) if efetivo_corr else 0.0
+            c5,c6=st.columns(2)
+            folgas_corr=int(c5.number_input('Folgas programadas',min_value=0,value=int(num('folgas'))))
+            atestados_corr=int(c6.number_input('Atestados médicos',min_value=0,value=int(num('atestados'))))
+            efetivo_corr=max(0,hc_corr-ferias_corr-afast_corr-folgas_corr)
+            presentes_corr=max(0,efetivo_corr-faltas_corr-atestados_corr)
+            abs_corr=round(100*(faltas_corr+atestados_corr)/efetivo_corr,2) if efetivo_corr else 0.0
             st.info(f'Efetivo considerado: {efetivo_corr} | Presentes: {presentes_corr} | Absenteísmo: {abs_corr:.1f}%')
             alteracoes.update(headcount=hc_corr,ferias=ferias_corr,afastamentos=afast_corr,
-                              ausencias=faltas_corr,presentes=presentes_corr,absenteismo=abs_corr)
+                              folgas=folgas_corr,atestados=atestados_corr,ausencias=faltas_corr,presentes=presentes_corr,absenteismo=abs_corr)
             if op=='CDA 01 - Separação':
                 st.markdown('#### Separação — corrija vendas e transferências')
                 st.caption('Os totais de cargas e toneladas são calculados automaticamente a partir dos campos abaixo.')
@@ -457,7 +462,7 @@ def editar_historico(df):
                 st.error('Confirme os valores antes de salvar.')
             elif not responsavel.strip() or not autor.strip() or not motivo.strip():
                 st.error('Preencha líder, autor e motivo.')
-            elif ferias_corr+afast_corr+faltas_corr>hc_corr:
+            elif ferias_corr+afast_corr+folgas_corr+atestados_corr+faltas_corr>hc_corr:
                 st.error('Férias, afastamentos e faltas não podem ultrapassar o headcount.')
             elif op=='CDA 02' and (alteracoes['conf_cargas_conferidas']>alteracoes['conf_total_cargas'] or alteracoes['conf_uzs_conferidas']>alteracoes['conf_total_uzs']):
                 st.error('Conferidos não podem superar o total.')
@@ -576,8 +581,8 @@ elif pagina=='🎯 Planejado do Dia':
         for t in ['T1','T2','T3']:
             rt=base_abs[base_abs.turno==t]
             if not rt.empty:
-                hc=float((rt.headcount-rt.ferias-rt.afastamentos).clip(lower=0).sum())
-                au=float(rt.ausencias.sum())
+                hc=float((rt.headcount-rt.ferias-rt.afastamentos-rt.folgas).clip(lower=0).sum())
+                au=float((rt.ausencias+rt.atestados).sum())
                 perc=(au/hc*100) if hc else 0.0
                 abs_turnos[t]=(perc,au,hc)
                 hc_geral+=hc
@@ -678,9 +683,12 @@ elif pagina=='📝 Nova Passagem':
     h3,h4=st.columns(2)
     afastamentos=int(h3.number_input('Afastamentos (não contam como falta)',min_value=0,step=1))
     aus=int(h4.number_input('Faltas / ausências não programadas',min_value=0,step=1))
-    efetivo=max(hc-ferias-afastamentos,0)
-    presentes=max(efetivo-aus,0)
-    abs_pct=(aus/efetivo*100) if efetivo else 0
+    h5,h6=st.columns(2)
+    folgas=int(h5.number_input('Folgas programadas',min_value=0,step=1))
+    atestados=int(h6.number_input('Atestados médicos',min_value=0,step=1))
+    efetivo=max(hc-ferias-afastamentos-folgas,0)
+    presentes=max(efetivo-aus-atestados,0)
+    abs_pct=((aus+atestados)/efetivo*100) if efetivo else 0
     m1,m2,m3,m4=st.columns(4)
     m1.metric('Efetivo considerado',efetivo)
     m2.metric('Presentes',presentes)
@@ -827,7 +835,7 @@ elif pagina=='📝 Nova Passagem':
         elif not data_confirmada: st.error('Confirme a data operacional antes de salvar a passagem.')
         elif ferias>hc: st.error('Férias não podem superar o headcount.')
         elif afastamentos>hc-ferias: st.error('Férias e afastamentos não podem superar o headcount.')
-        elif aus>hc-ferias-afastamentos: st.error('Faltas não podem superar o efetivo considerado.')
+        elif folgas+atestados+aus>hc-ferias-afastamentos: st.error('Faltas não podem superar o efetivo considerado.')
         elif operacao=='CDA 02' and (conf_cc>conf_tc or conf_uc>conf_tu): st.error('A quantidade conferida não pode superar o total.')
         else:
             c=None
@@ -837,6 +845,8 @@ elif pagina=='📝 Nova Passagem':
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS cargas_em_pd INTEGER NOT NULL DEFAULT 0')
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS ferias INTEGER NOT NULL DEFAULT 0')
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS afastamentos INTEGER NOT NULL DEFAULT 0')
+                cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS folgas INTEGER NOT NULL DEFAULT 0')
+                cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS atestados INTEGER NOT NULL DEFAULT 0')
                 cur.execute('''INSERT INTO passagens(
                 criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
                 cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
@@ -848,12 +858,12 @@ elif pagina=='📝 Nova Passagem':
                 reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
                 varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
                 conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas,
-                cargas_aguardando_caixas_cda02,cargas_em_pd,ferias,afastamentos
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
+                cargas_aguardando_caixas_cda02,cargas_em_pd,ferias,afastamentos,folgas,atestados
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
                 (agora_operacional().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
                  cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
                  receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
-                 equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos)); pid=cur.lastrowid
+                 equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos,folgas,atestados)); pid=cur.lastrowid
                 if pid is None:
                     c.rollback()
                     st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
@@ -990,8 +1000,8 @@ elif pagina=='👔 Visão do Supervisor':
         dados=dados.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
         dados['Volume_t']=dados['toneladas_realizadas'].apply(em_toneladas) if op!='Estoque' else dados['toneladas_estoque'].apply(em_toneladas)
         dados['Movimentos']=dados['veiculos_carregados'] if op=='CDA 01 - Carregamento' else dados['cargas_realizadas']
-        total_hc=float((dados['headcount']-dados['ferias']-dados['afastamentos']).clip(lower=0).sum())
-        total_aus=float(dados['ausencias'].sum())
+        total_hc=float((dados['headcount']-dados['ferias']-dados['afastamentos']-dados['folgas']).clip(lower=0).sum())
+        total_aus=float((dados['ausencias']+dados['atestados']).sum())
         a,b,c,d=st.columns(4)
         a.metric('Passagens registradas',len(dados))
         if op=='Estoque':
@@ -1005,23 +1015,24 @@ elif pagina=='👔 Visão do Supervisor':
         total_previsto=int(dados['headcount'].sum())
         total_ferias=int(dados['ferias'].sum())
         total_afast=int(dados['afastamentos'].sum())
-        total_faltas=int(dados['ausencias'].sum())
-        total_presentes=max(0,int(total_hc)-total_faltas)
+        total_faltas=int((dados['ausencias']+dados['atestados']).sum())
+        total_presentes=max(0,int(total_hc)-total_faltas-int(dados['atestados'].sum()))
         e1,e2,e3=st.columns(3)
         e1.metric('Headcount previsto',total_previsto)
         e2.metric('Férias',total_ferias)
         e3.metric('Afastamentos',total_afast)
+        st.caption(f"Folgas programadas: {int(dados['folgas'].sum())} | Atestados: {int(dados['atestados'].sum())}")
         e4,e5,e6=st.columns(3)
         e4.metric('Efetivo considerado',int(total_hc))
         e5.metric('Faltas',total_faltas)
         e6.metric('Presentes',total_presentes)
         st.caption('Absenteísmo = faltas ÷ (headcount previsto − férias − afastamentos). Férias e afastamentos não são registrados como faltas.')
-        equipe_detalhe=dados[['data','turno','responsavel','headcount','ferias','afastamentos','ausencias']].copy()
-        equipe_detalhe['Efetivo considerado']=(equipe_detalhe['headcount']-equipe_detalhe['ferias']-equipe_detalhe['afastamentos']).clip(lower=0)
-        equipe_detalhe['Presentes']=(equipe_detalhe['Efetivo considerado']-equipe_detalhe['ausencias']).clip(lower=0)
-        equipe_detalhe['Absenteísmo (%)']=equipe_detalhe.apply(lambda r: round(100*r['ausencias']/r['Efetivo considerado'],1) if r['Efetivo considerado'] else 0,axis=1)
+        equipe_detalhe=dados[['data','turno','responsavel','headcount','ferias','afastamentos','folgas','atestados','ausencias']].copy()
+        equipe_detalhe['Efetivo considerado']=(equipe_detalhe['headcount']-equipe_detalhe['ferias']-equipe_detalhe['afastamentos']-equipe_detalhe['folgas']).clip(lower=0)
+        equipe_detalhe['Presentes']=(equipe_detalhe['Efetivo considerado']-equipe_detalhe['ausencias']-equipe_detalhe['atestados']).clip(lower=0)
+        equipe_detalhe['Absenteísmo (%)']=equipe_detalhe.apply(lambda r: round(100*(r['ausencias']+r['atestados'])/r['Efetivo considerado'],1) if r['Efetivo considerado'] else 0,axis=1)
         equipe_detalhe['turno']=equipe_detalhe['turno'].apply(nome_turno)
-        st.dataframe(equipe_detalhe.rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','headcount':'Headcount previsto','ferias':'Férias','afastamentos':'Afastamentos','ausencias':'Faltas'}),hide_index=True,use_container_width=True)
+        st.dataframe(equipe_detalhe.rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','headcount':'Headcount previsto','ferias':'Férias','afastamentos':'Afastamentos','folgas':'Folgas','atestados':'Atestados','ausencias':'Faltas'}),hide_index=True,use_container_width=True)
         st.markdown('#### Detalhamento da operação')
         if op=='CDA 01 - Separação':
             a,b,c,d=st.columns(4)
@@ -1078,10 +1089,10 @@ elif pagina=='👔 Visão do Supervisor':
             evol=dados.groupby('data',as_index=True)[['Volume_t','Movimentos']].sum()
             st.line_chart(evol)
         st.markdown('#### Resultado por turno')
-        dados['Efetivo_abs']=(dados['headcount']-dados['ferias']-dados['afastamentos']).clip(lower=0)
-        por_turno=dados.groupby('turno',as_index=False).agg(Passagens=('id','count'),Movimentos=('Movimentos','sum'),Toneladas=('Volume_t','sum'),Ausencias=('ausencias','sum'),Headcount=('Efetivo_abs','sum'))
+        dados['Efetivo_abs']=(dados['headcount']-dados['ferias']-dados['afastamentos']-dados['folgas']).clip(lower=0)
+        por_turno=dados.groupby('turno',as_index=False).agg(Passagens=('id','count'),Movimentos=('Movimentos','sum'),Toneladas=('Volume_t','sum'),Ausencias=('ausencias','sum'),Atestados=('atestados','sum'),Headcount=('Efetivo_abs','sum'))
         por_turno['Turno']=por_turno['turno'].apply(nome_turno)
-        por_turno['Absenteísmo (%)']=por_turno.apply(lambda r: round(r['Ausencias']/r['Headcount']*100,1) if r['Headcount'] else 0,axis=1)
+        por_turno['Absenteísmo (%)']=por_turno.apply(lambda r: round((r['Ausencias']+r['Atestados'])/r['Headcount']*100,1) if r['Headcount'] else 0,axis=1)
         st.dataframe(por_turno[['Turno','Passagens','Movimentos','Toneladas','Absenteísmo (%)']],hide_index=True,use_container_width=True)
         st.markdown('#### Ofensores e observações')
         ocorrencias=dados[(dados['ofensor'].fillna('Sem ofensor')!='Sem ofensor') | (dados['observacoes'].fillna('').str.strip()!='')].copy()
@@ -1111,7 +1122,7 @@ elif pagina=='📊 Semana':
         df['Toneladas_exibicao']=df.apply(lambda r: em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else em_toneladas(r['toneladas_estoque']),axis=1)
         df['Cargas_exibicao']=df.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
         c1,c2,c3,c4=st.columns(4)
-        hc_total=float((df.headcount-df.ferias-df.afastamentos).clip(lower=0).sum()); aus_total=float(df.ausencias.sum())
+        hc_total=float((df.headcount-df.ferias-df.afastamentos-df.folgas).clip(lower=0).sum()); aus_total=float((df.ausencias+df.atestados).sum())
         c1.metric('Passagens',len(df)); c2.metric('Cargas',f"{df.Cargas_exibicao.sum():g}"); c3.metric('Toneladas por operação','Ver detalhamento'); c4.metric('Absenteísmo',f"{(aus_total/hc_total*100):.1f}%" if hc_total else '—')
         chart=df.groupby(['data','operacao'],as_index=False).agg(Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'))
         st.markdown('#### Evolução diária de toneladas por operação'); st.line_chart(chart.pivot(index='data',columns='operacao',values='Toneladas').fillna(0))
