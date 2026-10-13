@@ -294,8 +294,15 @@ def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
         if not row:
             raise ValueError('Registro não encontrado.')
         anterior=json.loads(row[0])
-        if anterior!=original:
-            raise ValueError('O registro foi modificado. Recarregue antes de corrigir.')
+        # A migração adicionou campos de efetivo aos registros antigos.
+        # Ignore somente a diferença entre campos novos ausentes no snapshot
+        # e seus valores padrão zero; alterações reais continuam bloqueadas.
+        original_completo=dict(original)
+        for campo in ('ferias','afastamentos'):
+            if campo not in original_completo and anterior.get(campo)==0:
+                original_completo[campo]=0
+        if anterior!=original_completo:
+            raise ValueError('O registro foi atualizado desde a abertura. Feche e reabra a edição para carregar os valores atuais.')
         if anterior['operacao']=='CDA 02':
             cur.execute("SELECT id FROM passagens WHERE data=? AND turno=? AND area=? AND operacao=? AND id<>?",
                         (alteracoes.get('data',anterior['data']),alteracoes.get('turno',anterior['turno']),
@@ -428,6 +435,9 @@ def editar_historico(df):
                         salvar_edicao_historico(rid,original,modificados,autor,motivo)
                     except ValueError as erro:
                         st.error(str(erro))
+                        if 'registro foi atualizado' in str(erro):
+                            st.session_state.pop(chave,None)
+                            st.info('Os dados em memória foram atualizados. Selecione novamente a passagem antes de salvar.')
                     except Exception:
                         st.error('Não foi possível salvar a correção. Nenhuma alteração foi confirmada. Verifique a conexão e a permissão de auditoria.')
                     else:
