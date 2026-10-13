@@ -194,6 +194,52 @@ def status_auto(pend, absenteismo, ofensor='Sem ofensor', ofensor_grave=False):
     return '🟢 Normal'
 
 
+def resumo_whatsapp(r,pend):
+    """Gera mensagem completa com os dados salvos da passagem."""
+    import pandas as pd
+    def v(k,default=0):
+        x=r.get(k,default)
+        return default if x is None or (not isinstance(x,(list,dict)) and pd.isna(x)) else x
+    def q(k): return fmt_qtd(v(k))
+    def t(k): return fmt_t(em_toneladas(v(k)))
+    op=v('operacao','')
+    data=pd.to_datetime(v('data')).strftime('%d/%m/%Y')
+    m=['📋 *PASSAGEM DE TURNO | ADIMAX*','━━━━━━━━━━━━━━━━━━━━',f'📅 Data: {data}',f'🏭 Operação: {op}',f'🕒 Turno: {nome_turno(v("turno",""))}',f'👤 Líder: {v("responsavel","")}', '', '📦 *RESULTADOS DO TURNO*']
+    if op=='CDA 01 - Separação':
+        m += [f'• Vendas: {q("varejo_cargas")} cargas | {t("varejo_ton")}',f'• Transferências: {q("transferencias_qtd")} | {t("transferencias_ton")}',f'• Total: {q("cargas_realizadas")} operações | {t("toneladas_realizadas")}',f'• Aguardando caixas CDA 02: {q("cargas_aguardando_caixas_cda02")}',f'• Cargas em P&D: {q("cargas_em_pd")}']
+    elif op=='CDA 01 - Carregamento':
+        m += [f'• Veículos carregados: {q("veiculos_carregados")}',f'• Toneladas carregadas: {t("toneladas_realizadas")}',f'• Veículos pendentes: {q("veiculos_pendentes")}']
+    elif op=='CDA 02':
+        m += [f'• Cargas separadas: {q("cargas_realizadas")}',f'• Paletes/UZs: {q("uz_paletes")}',f'• P&D em espera: {q("pd_espera")}',f'• Transbordos: {q("transbordo_total")} paletes','', '🔎 *CONFERÊNCIA*',f'• Cargas: {q("conf_cargas_conferidas")} / {q("conf_total_cargas")}',f'• UZs: {q("conf_uzs_conferidas")} / {q("conf_total_uzs")}',f'• Erros: {q("conf_erros")}']
+        if float(v('conf_total_cargas')): m.append(f'• % cargas: {pct(float(v("conf_cargas_conferidas")),float(v("conf_total_cargas"))):.1f}%')
+        if float(v('conf_total_uzs')): m.append(f'• % UZs: {pct(float(v("conf_uzs_conferidas")),float(v("conf_total_uzs"))):.1f}%')
+    elif op=='Estoque':
+        for titulo,campo,unidade in [('Produção recebida','recebimento_producao_kg','kg'),('Paletes recebidos','recebimento_producao_paletes',''),('Picking abastecido','abastecimento_picking_kg','kg'),('Paletes abastecidos','abastecimento_picking_paletes',''),('Carretas descarregadas','carretas_descarregadas',''),('Carretas armazenadas','carretas_armazenadas',''),('Carretas aguardando','carretas_aguardando',''),('Transbordos CDA 02','transbordos_cda02',''),('Reembalos','reembalo_enviados',''),('Reprocessos','reprocesso_enviados',''),('Máquinas paradas','maquinas_paradas','')]:
+            m.append(f'• {titulo}: {q(campo)} {unidade}'.rstrip())
+    if not pend.empty:
+        m += ['','⏳ *PENDÊNCIAS DETALHADAS*']
+        for _,p in pend.iterrows():
+            campos=[str(p.get(k) or '').strip() for k in ('carga','cliente','situacao','motivo','descricao')]
+            m.append('• '+' | '.join(x for x in campos if x))
+    hc=float(v('headcount'));au=float(v('ausencias'))
+    m += ['','👥 *EQUIPE*',f'• Headcount: {q("headcount")}',f'• Presentes: {q("presentes")}',f'• Ausências: {q("ausencias")}',f'• Absenteísmo: {pct(au,hc):.1f}%' if hc else '• Absenteísmo: não informado','','⚠️ *PRINCIPAL OFENSOR*',str(v('ofensor','Sem ofensor')),'','📝 *OBSERVAÇÕES*',str(v('observacoes','Sem observações') or 'Sem observações')]
+    if op=='Estoque' and str(v('pendencias_proximo_turno','')).strip(): m += ['','⏭️ *PRÓXIMO TURNO*',str(v('pendencias_proximo_turno'))]
+    m += ['',f'🚦 *STATUS:* {v("status","")}', '━━━━━━━━━━━━━━━━━━━━','✅ Registrado no Passagem de Turno | ADIMAX']
+    return '\n'.join(m)
+
+def mostrar_resumo_whatsapp(rid):
+    import urllib.parse
+    df=query('SELECT * FROM passagens WHERE id=?',(int(rid),))
+    if df.empty:
+        st.warning('Registro não encontrado.')
+        return
+    pend=query('SELECT carga,cliente,situacao,motivo,descricao FROM pendencias WHERE passagem_id=?',(int(rid),))
+    mensagem=resumo_whatsapp(df.iloc[0],pend)
+    st.markdown('#### 📲 Resumo completo para WhatsApp')
+    st.caption('Use o botão de copiar do bloco abaixo ou abra o WhatsApp com a mensagem pronta.')
+    st.code(mensagem,language=None)
+    st.link_button('🟢 Enviar pelo WhatsApp','https://api.whatsapp.com/send?text='+urllib.parse.quote(mensagem))
+
 def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
     """Salva uma correção explícita e sua versão anterior na mesma transação."""
     import json
@@ -649,8 +695,11 @@ elif pagina=='📝 Nova Passagem':
                 st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
                 st.stop()
             for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
-            c.commit();c.close();st.success('Passagem salva com sucesso.')
+            c.commit();c.close();st.session_state['ultima_passagem_whats']=int(pid);st.success('Passagem salva com sucesso.')
 
+
+    if st.session_state.get('ultima_passagem_whats'):
+        mostrar_resumo_whatsapp(st.session_state['ultima_passagem_whats'])
 
 elif pagina=='👁️ Visão Atual':
     st.header('👁️ Visão atual')
@@ -900,6 +949,11 @@ elif pagina=='🕘 Histórico':
         st.caption('A data operacional identifica o dia do turno. Registrado em mostra o instante de gravação; horários antigos foram mantidos como armazenados, sem reinterpretar o fuso ou corrigir datas automaticamente.')
         st.dataframe(df_exibir,use_container_width=True,hide_index=True)
         st.download_button('⬇️ Exportar CSV',df_exibir.to_csv(index=False).encode('utf-8-sig'),'historico_passagem.csv','text/csv')
+        with st.expander('📲 Gerar resumo completo para WhatsApp'):
+            opcoes={int(r.id):f'ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao}' for r in df.itertuples()}
+            selecionado=st.selectbox('Passagem para compartilhar',list(opcoes),index=None,format_func=lambda x:opcoes[x],key='historico_whatsapp')
+            if selecionado is not None:
+                mostrar_resumo_whatsapp(selecionado)
         editar_historico(df)
         with st.expander('🗑️ Excluir registro'):
             rid=st.number_input('ID do registro',min_value=1,step=1); conf=st.checkbox('Confirmo a exclusão')
