@@ -258,6 +258,7 @@ def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
                 'cargas_realizadas','toneladas_realizadas','varejo_cargas',
                 'varejo_ton','transferencias_qtd','transferencias_ton',
                 'veiculos_carregados','veiculos_pendentes','uz_paletes',
+                'headcount','ferias','afastamentos','ausencias','presentes','absenteismo',
                 'pd_espera','conf_total_cargas','conf_total_uzs',
                 'conf_cargas_conferidas','conf_uzs_conferidas','conf_erros'}
     if not alteracoes or not set(alteracoes).issubset(permitidos):
@@ -333,6 +334,19 @@ def editar_historico(df):
             status=st.selectbox('Status',estados,index=estados.index(original['status']))
             alteracoes={'data':nova_data.isoformat(),'turno':novo_turno,'responsavel':responsavel.strip(),
                         'ofensor':ofensor.strip() or 'Sem ofensor','observacoes':observacoes,'status':status}
+            st.markdown('#### Equipe e absenteísmo')
+            c1,c2=st.columns(2)
+            hc_corr=int(c1.number_input('Headcount previsto',min_value=0,value=int(num('headcount')),step=1))
+            ferias_corr=int(c2.number_input('Férias',min_value=0,value=int(num('ferias')),step=1))
+            c3,c4=st.columns(2)
+            afast_corr=int(c3.number_input('Afastamentos',min_value=0,value=int(num('afastamentos')),step=1))
+            faltas_corr=int(c4.number_input('Faltas',min_value=0,value=int(num('ausencias')),step=1))
+            efetivo_corr=max(0,hc_corr-ferias_corr-afast_corr)
+            presentes_corr=max(0,efetivo_corr-faltas_corr)
+            abs_corr=round(100*faltas_corr/efetivo_corr,2) if efetivo_corr else 0.0
+            st.info(f'Efetivo considerado: {efetivo_corr} | Presentes: {presentes_corr} | Absenteísmo: {abs_corr:.1f}%')
+            alteracoes.update(headcount=hc_corr,ferias=ferias_corr,afastamentos=afast_corr,
+                              ausencias=faltas_corr,presentes=presentes_corr,absenteismo=abs_corr)
             if op=='CDA 01 - Separação':
                 st.markdown('#### Separação — corrija vendas e transferências')
                 st.caption('Os totais de cargas e toneladas são calculados automaticamente a partir dos campos abaixo.')
@@ -380,6 +394,8 @@ def editar_historico(df):
                 st.error('Confirme os valores antes de salvar.')
             elif not responsavel.strip() or not autor.strip() or not motivo.strip():
                 st.error('Preencha líder, autor e motivo.')
+            elif ferias_corr+afast_corr+faltas_corr>hc_corr:
+                st.error('Férias, afastamentos e faltas não podem ultrapassar o headcount.')
             elif op=='CDA 02' and (alteracoes['conf_cargas_conferidas']>alteracoes['conf_total_cargas'] or alteracoes['conf_uzs_conferidas']>alteracoes['conf_total_uzs']):
                 st.error('Conferidos não podem superar o total.')
             else:
@@ -494,7 +510,7 @@ elif pagina=='🎯 Planejado do Dia':
         for t in ['T1','T2','T3']:
             rt=base_abs[base_abs.turno==t]
             if not rt.empty:
-                hc=float(rt.headcount.sum())
+                hc=float((rt.headcount-rt.ferias-rt.afastamentos).clip(lower=0).sum())
                 au=float(rt.ausencias.sum())
                 perc=(au/hc*100) if hc else 0.0
                 abs_turnos[t]=(perc,au,hc)
@@ -908,7 +924,7 @@ elif pagina=='👔 Visão do Supervisor':
         dados=dados.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
         dados['Volume_t']=dados['toneladas_realizadas'].apply(em_toneladas) if op!='Estoque' else dados['toneladas_estoque'].apply(em_toneladas)
         dados['Movimentos']=dados['veiculos_carregados'] if op=='CDA 01 - Carregamento' else dados['cargas_realizadas']
-        total_hc=float(dados['headcount'].sum())
+        total_hc=float((dados['headcount']-dados['ferias']-dados['afastamentos']).clip(lower=0).sum())
         total_aus=float(dados['ausencias'].sum())
         a,b,c,d=st.columns(4)
         a.metric('Passagens registradas',len(dados))
@@ -975,7 +991,8 @@ elif pagina=='👔 Visão do Supervisor':
             evol=dados.groupby('data',as_index=True)[['Volume_t','Movimentos']].sum()
             st.line_chart(evol)
         st.markdown('#### Resultado por turno')
-        por_turno=dados.groupby('turno',as_index=False).agg(Passagens=('id','count'),Movimentos=('Movimentos','sum'),Toneladas=('Volume_t','sum'),Ausencias=('ausencias','sum'),Headcount=('headcount','sum'))
+        dados['Efetivo_abs']=(dados['headcount']-dados['ferias']-dados['afastamentos']).clip(lower=0)
+        por_turno=dados.groupby('turno',as_index=False).agg(Passagens=('id','count'),Movimentos=('Movimentos','sum'),Toneladas=('Volume_t','sum'),Ausencias=('ausencias','sum'),Headcount=('Efetivo_abs','sum'))
         por_turno['Turno']=por_turno['turno'].apply(nome_turno)
         por_turno['Absenteísmo (%)']=por_turno.apply(lambda r: round(r['Ausencias']/r['Headcount']*100,1) if r['Headcount'] else 0,axis=1)
         st.dataframe(por_turno[['Turno','Passagens','Movimentos','Toneladas','Absenteísmo (%)']],hide_index=True,use_container_width=True)
@@ -1007,7 +1024,7 @@ elif pagina=='📊 Semana':
         df['Toneladas_exibicao']=df.apply(lambda r: em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else em_toneladas(r['toneladas_estoque']),axis=1)
         df['Cargas_exibicao']=df.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
         c1,c2,c3,c4=st.columns(4)
-        hc_total=float(df.headcount.sum()); aus_total=float(df.ausencias.sum())
+        hc_total=float((df.headcount-df.ferias-df.afastamentos).clip(lower=0).sum()); aus_total=float(df.ausencias.sum())
         c1.metric('Passagens',len(df)); c2.metric('Cargas',f"{df.Cargas_exibicao.sum():g}"); c3.metric('Toneladas por operação','Ver detalhamento'); c4.metric('Absenteísmo',f"{(aus_total/hc_total*100):.1f}%" if hc_total else '—')
         chart=df.groupby(['data','operacao'],as_index=False).agg(Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'))
         st.markdown('#### Evolução diária de toneladas por operação'); st.line_chart(chart.pivot(index='data',columns='operacao',values='Toneladas').fillna(0))
