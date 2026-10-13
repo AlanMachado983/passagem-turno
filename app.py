@@ -599,9 +599,14 @@ elif pagina=='📝 Nova Passagem':
                 cols_trans[i%4].metric(nome,f'{int(tr[i])} paletes')
             st.success(f'{qtd_mov} movimentações consultadas. Total: {int(sum(tr))} paletes.')
             st.caption('Atualização da consulta a cada 45 segundos; valores registrados na passagem ao salvar.')
-        except Exception:
-            st.error('Transbordos indisponível: não é possível preencher automaticamente. Atualize a página e tente novamente.')
-            st.stop()
+        except Exception as erro_trans:
+            st.warning('⚠️ Integração com Vira 360 temporariamente indisponível. A passagem pode continuar com lançamento manual de contingência.')
+            st.caption('O Vira 360 passou a exigir autenticação na consulta. Os valores abaixo devem ser conferidos com o registro do Vira 360. Nenhuma movimentação será alterada no sistema de origem.')
+            tr=[]
+            cols_trans=st.columns(4)
+            for i,nome in enumerate(setores_trans):
+                tr.append(float(cols_trans[i%4].number_input(f'{nome} — paletes (contingência)',min_value=0,step=1,key=f'trans_manual_{nome}')))
+            st.info('Modo contingência: valores digitados manualmente para esta passagem de turno.')
         trans=sum(tr); pt=pp
         st.markdown('### 🔎 Conferência CDA 02')
         st.caption('Dados da mesma data, turno e responsável desta passagem. Percentuais automáticos.')
