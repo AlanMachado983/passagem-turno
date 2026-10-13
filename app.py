@@ -68,11 +68,17 @@ class PgConnection:
     def rollback(self): self._conn.rollback()
     def close(self): self._conn.close()
 
+def headers_integracao_vira():
+    chave=st.secrets.get('VIRA360_INTEGRATION_KEY') or os.environ.get('VIRA360_INTEGRATION_KEY')
+    if not chave:
+        raise RuntimeError('Configure VIRA360_INTEGRATION_KEY nos Secrets do Streamlit')
+    return {'Accept':'application/json','X-Integration-Key':str(chave)}
+
 @st.cache_data(ttl=45, show_spinner=False)
 def consultar_transbordos(data_ref, turno_ref):
     import json, urllib.parse, urllib.request, unicodedata
-    url = 'https://transbordos-cda02-online.onrender.com/api/viagens?' + urllib.parse.urlencode({'data':str(data_ref),'turno':str(turno_ref)})
-    with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as resposta:
+    url = 'https://transbordos-cda02-online.onrender.com/api/integracoes/passagem/viagens?' + urllib.parse.urlencode({'data':str(data_ref),'turno':str(turno_ref)})
+    with urllib.request.urlopen(urllib.request.Request(url,headers=headers_integracao_vira()),timeout=15) as resposta:
         registros=json.load(resposta)
     if not isinstance(registros,list):
         raise ValueError('Resposta inválida')
@@ -91,8 +97,8 @@ def consultar_transbordos(data_ref, turno_ref):
 def consultar_fluxo_transbordos(data_ref, turno_ref):
     """Consulta os dois tipos de movimento do app Transbordos separadamente."""
     import json, urllib.parse, urllib.request
-    url='https://transbordos-cda02-online.onrender.com/api/viagens?'+urllib.parse.urlencode({'data':str(data_ref),'turno':str(turno_ref)})
-    with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=15) as resposta:
+    url='https://transbordos-cda02-online.onrender.com/api/integracoes/passagem/viagens?'+urllib.parse.urlencode({'data':str(data_ref),'turno':str(turno_ref)})
+    with urllib.request.urlopen(urllib.request.Request(url,headers=headers_integracao_vira()),timeout=15) as resposta:
         registros=json.load(resposta)
     if not isinstance(registros,list):
         raise ValueError('Resposta de transbordos inválida')
