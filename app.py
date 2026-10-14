@@ -1203,41 +1203,31 @@ elif pagina=='🕘 Histórico':
             if selecionado is not None:
                 mostrar_resumo_whatsapp(selecionado)
         editar_historico(df)
-        st.divider()
-        with st.expander('🔐 Administração — excluir passagem'):
-            import hmac
-            chave_admin=st.secrets.get('PASSAGEM_ADMIN_EXCLUSAO_SENHA','')
-            if not chave_admin:
-                st.info('Exclusão administrativa ainda não habilitada. Configure PASSAGEM_ADMIN_EXCLUSAO_SENHA nos Secrets do Streamlit; nunca no GitHub.')
-            else:
-                senha_digitada=st.text_input('Senha exclusiva do administrador',type='password',key='senha_exclusao_admin')
-                autorizado=bool(senha_digitada) and hmac.compare_digest(str(senha_digitada),str(chave_admin))
-                if not autorizado:
-                    st.caption('A exclusão exige autenticação administrativa. O acesso normal dos líderes continua sem senha.')
-                else:
-                    opcoes_excluir={int(r.id):f"ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao} • {r.responsavel}" for r in df.itertuples()}
-                    rid_excluir=st.selectbox('Registro para excluir',list(opcoes_excluir),index=None,format_func=lambda x:opcoes_excluir[x],key='id_exclusao')
-                    if rid_excluir is not None:
-                        st.warning(f'A passagem {opcoes_excluir[rid_excluir]} deixará de aparecer nos painéis. Uma cópia será mantida para auditoria.')
-                        motivo_exclusao=st.text_area('Motivo da exclusão (obrigatório)',key='motivo_exclusao')
-                        confirmar_exclusao=st.checkbox('Confirmo a exclusão desta passagem',key='confirmar_exclusao')
-                        if st.button('🗑️ Excluir passagem selecionada',type='primary',disabled=not(confirmar_exclusao and motivo_exclusao.strip()),key='executar_exclusao'):
-                            c=None
-                            try:
-                                c=conn(); cur=c.cursor()
-                                cur.execute('UPDATE passagens SET excluido_em=NOW(), excluido_por=?, motivo_exclusao=? WHERE id=? AND excluido_em IS NULL',('Administrador',motivo_exclusao.strip(),int(rid_excluir)))
-                                alterados=cur._cursor.rowcount
-                                c.commit()
-                                if alterados:
-                                    st.session_state['historico_salvo']=f'Passagem ID {rid_excluir} excluída dos painéis e preservada para auditoria.'
-                                    st.rerun()
-                                else:
-                                    st.warning('Passagem não encontrada ou já excluída.')
-                            except Exception:
-                                if c: c.rollback()
-                                st.error('Não foi possível excluir. Nenhuma exclusão foi confirmada.')
-                            finally:
-                                if c: c.close()
+        with st.expander('🗑️ Excluir registro do histórico'):
+            st.caption('Selecione o registro como na opção Modificar. A exclusão retira a passagem dos indicadores, mas mantém os dados para auditoria.')
+            opcoes_excluir={int(r.id):f"ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao} • {r.responsavel}" for r in df.itertuples()}
+            rid_excluir=st.selectbox('Passagem para excluir',list(opcoes_excluir),index=None,format_func=lambda x:opcoes_excluir[x],key='id_exclusao')
+            if rid_excluir is not None:
+                st.warning(f'Você selecionou: {opcoes_excluir[rid_excluir]}. A passagem deixará de aparecer nos painéis.')
+                motivo_exclusao=st.text_area('Motivo da exclusão (obrigatório)',key='motivo_exclusao')
+                confirmar_exclusao=st.checkbox('Confirmo que desejo excluir este registro',key='confirmar_exclusao')
+                if st.button('🗑️ Excluir passagem selecionada',type='primary',disabled=not(confirmar_exclusao and motivo_exclusao.strip()),key='executar_exclusao'):
+                    c=None
+                    try:
+                        c=conn(); cur=c.cursor()
+                        cur.execute('UPDATE passagens SET excluido_em=NOW(), excluido_por=?, motivo_exclusao=? WHERE id=? AND excluido_em IS NULL',('Usuário do Histórico (sem autenticação)',motivo_exclusao.strip(),int(rid_excluir)))
+                        alterados=cur._cursor.rowcount
+                        c.commit()
+                        if alterados:
+                            st.session_state['historico_salvo']=f'Passagem ID {rid_excluir} excluída dos painéis e preservada para auditoria.'
+                            st.rerun()
+                        else:
+                            st.warning('Passagem não encontrada ou já excluída.')
+                    except Exception:
+                        if c: c.rollback()
+                        st.error('Não foi possível excluir. Nenhuma exclusão foi confirmada.')
+                    finally:
+                        if c: c.close()
 
 else:
     st.header('🖨️ Passagem consolidada para impressão')
