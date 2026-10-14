@@ -264,7 +264,7 @@ def resumo_whatsapp(r,pend):
             m.append('• '+' | '.join(x for x in campos if x))
     hc=float(v('headcount'));au=float(v('ausencias'));ferias=float(v('ferias'));afast=float(v('afastamentos'));folgas_v=float(v('folgas'));atest_v=float(v('atestados'))
     hc_base=max(hc-ferias-afast-folgas_v,0)
-    m += ['','👥 *EQUIPE*',f'• Headcount: {q("headcount")}',f'• Férias: {fmt_qtd(ferias)}',f'• Afastamentos: {fmt_qtd(afast)}',f'• Folgas: {fmt_qtd(folgas_v)}',f'• Atestados: {fmt_qtd(atest_v)}',f'• Efetivo considerado: {fmt_qtd(hc_base)}',f'• Presentes: {q("presentes")}',f'• Ausências: {q("ausencias")}',f'• Absenteísmo: {pct(au+atest_v,hc_base):.1f}%' if hc_base else '• Absenteísmo: não informado',f'• Reposições recebidas: {q("reposicoes_recebidas")}',f'• Reposição necessária: {max(0,hc_base-float(v("presentes"))-float(v("reposicoes_recebidas"))):.0f}','','⚠️ *PRINCIPAL OFENSOR*',str(v('ofensor','Sem ofensor')),'','📝 *OBSERVAÇÕES*',str(v('observacoes','Sem observações') or 'Sem observações')]
+    m += ['','👥 *EQUIPE*',f'• Headcount: {q("headcount")}',f'• Férias: {fmt_qtd(ferias)}',f'• Afastamentos: {fmt_qtd(afast)}',f'• Folgas: {fmt_qtd(folgas_v)}',f'• Atestados: {fmt_qtd(atest_v)}',f'• Efetivo considerado: {fmt_qtd(hc_base)}',f'• Presentes: {q("presentes")}',f'• Ausências: {q("ausencias")}',f'• Absenteísmo: {pct(au+atest_v,hc_base):.1f}%' if hc_base else '• Absenteísmo: não informado',f'• Vagas para contratação: {fmt_qtd(v("vagas_contratacao",0))}','','⚠️ *PRINCIPAL OFENSOR*',str(v('ofensor','Sem ofensor')),'','📝 *OBSERVAÇÕES*',str(v('observacoes','Sem observações') or 'Sem observações')]
     if op=='Estoque' and str(v('pendencias_proximo_turno','')).strip(): m += ['','⏭️ *PRÓXIMO TURNO*',str(v('pendencias_proximo_turno'))]
     m += ['',f'🚦 *STATUS:* {v("status","")}', '━━━━━━━━━━━━━━━━━━━━','✅ Registrado no Passagem de Turno | ADIMAX']
     return '\n'.join(m)
@@ -742,9 +742,9 @@ elif pagina=='📝 Nova Passagem':
     atestados=int(h6.number_input('Atestados médicos',min_value=0,step=1))
     efetivo=max(hc-ferias-afastamentos-folgas,0)
     presentes=max(efetivo-aus-atestados,0)
-    reposicoes_recebidas=int(st.number_input('Reposições recebidas (reforços de outros setores/turnos)',min_value=0,step=1,help='Não reduz o absenteísmo.'))
-    disponiveis=presentes+reposicoes_recebidas
-    reposicao_necessaria=max(0,efetivo-disponiveis)
+    vagas_contratacao=int(st.number_input('Vagas para contratação',min_value=0,step=1,help='Informe quantas vagas estão abertas neste turno. Não altera o cálculo do absenteísmo.'))
+    reposicoes_recebidas=0  # Campo legado preservado no banco; não representa vagas.
+    disponiveis=presentes
     abs_pct=((aus+atestados)/efetivo*100) if efetivo else 0
     m1,m2,m3,m4=st.columns(4)
     m1.metric('Efetivo considerado',efetivo)
@@ -752,9 +752,9 @@ elif pagina=='📝 Nova Passagem':
     m3.metric('Férias',ferias)
     m4.metric('Absenteísmo',f'{abs_pct:.1f}%' if efetivo else '—')
     r1,r2,r3=st.columns(3)
-    r1.metric('Reposições recebidas',reposicoes_recebidas)
-    r2.metric('Efetivo disponível',disponiveis)
-    r3.metric('Reposição ainda necessária',reposicao_necessaria)
+    r1.metric('Vagas para contratação',vagas_contratacao)
+    r2.metric('Presentes',presentes)
+    r3.metric('Headcount necessário',hc)
     st.caption('Férias e afastamentos são separados das faltas. A classificação de afastamentos deve seguir a regra de RH da empresa.')
     # Passagem enxuta: não exige nomes/motivos individuais das ausências.
     aus_det=[]
@@ -937,6 +937,8 @@ elif pagina=='📝 Nova Passagem':
                  cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
                  receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
                  equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos,folgas,atestados,reposicoes_recebidas)); pid=cur.lastrowid
+                if pid is not None:
+                    cur.execute('UPDATE passagens SET vagas_contratacao=? WHERE id=?',(int(vagas_contratacao),int(pid)))
                 if pid is not None and operacao=='CDA 02':
                     cur.execute('UPDATE passagens SET diferencas_entre_pisos=? WHERE id=?',(int(diferencas_entre_pisos),int(pid)))
                 if pid is None:
@@ -1178,6 +1180,16 @@ elif pagina=='👔 Visão do Supervisor':
             a,b=st.columns(2)
             a.metric('Carretas armazenadas',f"{dados['carretas_armazenadas'].sum():g}")
             b.metric('Transbordos CDA 02',f"{dados['transbordos_cda02'].sum():g}")
+        st.markdown('#### 👥 Vagas para contratação')
+        st.caption('Vagas abertas informadas pelos líderes. Não são somadas ao absenteísmo. Registros anteriores à implantação podem não ter informação.')
+        vagas_base=dados.dropna(subset=['vagas_contratacao']).copy()
+        if vagas_base.empty:
+            st.info('Nenhuma vaga para contratação informada nas passagens do período.')
+        else:
+            vagas_turno=vagas_base.groupby('turno',as_index=False)['vagas_contratacao'].max()
+            vagas_turno['Turno']=vagas_turno['turno'].apply(nome_turno)
+            st.dataframe(vagas_turno[['Turno','vagas_contratacao']].rename(columns={'vagas_contratacao':'Vagas abertas (último valor máximo no período)'}),hide_index=True,use_container_width=True)
+            st.caption('Não somar vagas de dias diferentes: a mesma vaga pode permanecer aberta. Para uma visão diária, filtre uma única data.')
         st.markdown('#### Evolução da área')
         if op=='Estoque':
             evol=dados.groupby('data',as_index=True)[['recebimento_producao_paletes','abastecimento_picking_paletes']].sum()
