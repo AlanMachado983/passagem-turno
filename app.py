@@ -565,6 +565,7 @@ elif pagina=='🎯 Planejado do Dia':
     st.header('🎯 Painel de Gestão à Vista')
     st.caption('Logística • fechamento diário para acompanhamento e GDD')
     d=st.date_input('Data do painel',agora_operacional().date(),key='data_painel_dia')
+    data_painel=d  # Preserva a data: variáveis de colunas podem reutilizar o nome d.
     plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
     plan_car_qtd=scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')
     if plan_sep>=10000: plan_sep=plan_sep/1000.0
@@ -653,7 +654,7 @@ elif pagina=='🎯 Planejado do Dia':
     st.markdown('---')
     st.markdown('### 📦 Movimentação do Estoque — escala 2x2')
     st.caption('Somente registros do Estoque na data selecionada; sem deslocar o turno 2x2 para outro dia.')
-    estoque_dia=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? AND operacao='Estoque' ORDER BY id",(str(d),))
+    estoque_dia=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? AND operacao='Estoque' ORDER BY id",(str(data_painel),))
     if estoque_dia.empty:
         st.info('Ainda não há passagem do Estoque para esta data.')
     else:
