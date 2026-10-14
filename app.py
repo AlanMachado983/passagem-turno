@@ -859,7 +859,12 @@ elif pagina=='📝 Nova Passagem':
     ofensor_grave=st.checkbox('🚨 Ofensor grave: comprometeu a operação',value=False,help='Marque somente em caso de ocorrência com impacto operacional grave, como paralisação ou bloqueio relevante.')
     stat=status_auto(len(pend),abs_pct,of,ofensor_grave)
     st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
-    if st.button('💾 Salvar passagem',type='primary',use_container_width=True):
+    passagem_existente=query(
+        'SELECT id,responsavel,criado_em FROM passagens WHERE data=? AND area=? AND operacao=? AND turno=? AND registro_duplicado=FALSE ORDER BY id DESC LIMIT 1',
+        (str(data_reg),area,operacao,turno))
+    if not passagem_existente.empty:
+        st.error(f'🔒 Esta passagem já foi registrada para {data_reg.strftime("%d/%m/%Y")} — {turno_nome} — {operacao}. Registro nº {int(passagem_existente.iloc[0]["id"])}. Consulte o Histórico; não é permitido enviar novamente.')
+    if st.button('💾 Salvar passagem',type='primary',use_container_width=True,disabled=not passagem_existente.empty):
         if not resp.strip(): st.error('Informe o responsável pela passagem.')
         elif not data_confirmada: st.error('Confirme a data operacional antes de salvar a passagem.')
         elif ferias>hc: st.error('Férias não podem superar o headcount.')
@@ -889,14 +894,14 @@ elif pagina=='📝 Nova Passagem':
                 varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
                 conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas,
                 cargas_aguardando_caixas_cda02,cargas_em_pd,ferias,afastamentos,folgas,atestados,reposicoes_recebidas
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING''',
                 (agora_operacional().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
                  cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
                  receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
                  equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos,folgas,atestados,reposicoes_recebidas)); pid=cur.lastrowid
                 if pid is None:
                     c.rollback()
-                    st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
+                    st.error('Já existe uma passagem para esta data, operação e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
                     st.stop()
                 for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
                 c.commit();st.session_state['ultima_passagem_whats']=int(pid);st.success('Passagem salva com sucesso.')
