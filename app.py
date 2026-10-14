@@ -650,6 +650,29 @@ elif pagina=='🎯 Planejado do Dia':
             r=car[car.turno==t].iloc[-1]; n=float(r.veiculos_carregados); peso=em_toneladas(r.toneladas_realizadas)
         col.metric(nome_turno(t),f'{n:g} cargas',f'{peso:.1f} t')
     st.caption('Após a passagem do T3, este painel entrega o fechamento do dia para o GDD.')
+    st.markdown('---')
+    st.markdown('### 📦 Movimentação do Estoque — escala 2x2')
+    st.caption('Somente registros do Estoque na data selecionada; sem deslocar o turno 2x2 para outro dia.')
+    estoque_dia=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? AND operacao='Estoque' ORDER BY id",(str(d),))
+    if estoque_dia.empty:
+        st.info('Ainda não há passagem do Estoque para esta data.')
+    else:
+        estoque_dia=estoque_dia.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1)
+        recebimento_total=float(estoque_dia['recebimento_producao_kg'].sum())
+        picking_total=float(estoque_dia['abastecimento_picking_kg'].sum())
+        paletes_recebidos=float(estoque_dia['recebimento_producao_paletes'].sum())
+        paletes_picking=float(estoque_dia['abastecimento_picking_paletes'].sum())
+        e1,e2=st.columns(2)
+        e1.metric('Recebimento da produção',f"{recebimento_total:,.0f} kg".replace(',','.'))
+        e2.metric('Abastecimento do Picking',f"{picking_total:,.0f} kg".replace(',','.'))
+        e3,e4=st.columns(2)
+        e3.metric('Paletes recebidos',f'{paletes_recebidos:g}')
+        e4.metric('Paletes abastecidos',f'{paletes_picking:g}')
+        with st.expander('Detalhamento do Estoque por turno 2x2'):
+            detalhe_estoque=estoque_dia[['turno','recebimento_producao_kg','abastecimento_picking_kg','recebimento_producao_paletes','abastecimento_picking_paletes']].copy()
+            detalhe_estoque.columns=['Turno','Recebimento (kg)','Picking (kg)','Paletes recebidos','Paletes abastecidos']
+            st.dataframe(detalhe_estoque,hide_index=True,use_container_width=True)
+
 
 elif pagina=='📝 Nova Passagem':
     st.header('📝 Nova passagem')
