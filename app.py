@@ -568,7 +568,10 @@ elif pagina=='🎯 Planejado do Dia':
     plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
     plan_car_qtd=scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')
     if plan_sep>=10000: plan_sep=plan_sep/1000.0
-    dados=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d),))
+    dados=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data BETWEEN ? AND ? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d-timedelta(days=1)),str(d)))
+    if not dados.empty:
+        dados=dados[dados.apply(lambda r:data_ciclo_operacional(r['data'],r['turno'],r['operacao'])==d,axis=1)].copy()
+    st.caption('Ciclo do dia: T3 da véspera → T1 → T2 do dia selecionado.')
     if not dados.empty:
         dados=dados.sort_values('id').groupby(['operacao','turno'],as_index=False).tail(1)
     sep=dados[dados.operacao=='CDA 01 - Separação'] if not dados.empty else pd.DataFrame()
@@ -581,7 +584,9 @@ elif pagina=='🎯 Planejado do Dia':
     # soma as equipes das diferentes passagens/operações de cada turno.
     # Mantém somente a passagem mais recente de cada operação/turno para
     # não duplicar uma passagem que tenha sido corrigida/regravada.
-    abs_dia=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? ORDER BY id",(str(d),))
+    abs_dia=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data BETWEEN ? AND ? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento','CDA 02') ORDER BY id",(str(d-timedelta(days=1)),str(d)))
+    if not abs_dia.empty:
+        abs_dia=abs_dia[abs_dia.apply(lambda r:data_ciclo_operacional(r['data'],r['turno'],r['operacao'])==d,axis=1)].copy()
     hc_geral=0.0; aus_geral=0.0
     abs_turnos={t:(None,0.0,0.0) for t in ['T1','T2','T3']}
     if not abs_dia.empty:
@@ -600,7 +605,7 @@ elif pagina=='🎯 Planejado do Dia':
     st.markdown('### 👥 Absenteísmo do Dia')
     a1,a2,a3,a4=st.columns(4)
     a1.metric('Geral do dia',f'{abs_geral:.1f}%' if hc_geral else 'Aguardando')
-    for col,t in zip([a2,a3,a4],['T1','T2','T3']):
+    for col,t in zip([a2,a3,a4],['T3','T1','T2']):
         p,au,hc=abs_turnos[t]
         if p is None:
             col.metric(nome_turno(t),'Aguardando passagem')
@@ -627,7 +632,7 @@ elif pagina=='🎯 Planejado do Dia':
     d.metric('Transferências',fmt_t(transf_t))
     st.markdown('#### Realizado por turno — Separação')
     cols=st.columns(3)
-    for col,t in zip(cols,['T1','T2','T3']):
+    for col,t in zip(cols,['T3','T1','T2']):
         v=0.0
         if not sep.empty and not sep[sep.turno==t].empty: v=em_toneladas(sep[sep.turno==t].iloc[-1].toneladas_realizadas)
         col.metric(nome_turno(t),f'{v:.1f} t')
@@ -639,7 +644,7 @@ elif pagina=='🎯 Planejado do Dia':
     st.metric('Atingimento veículos',f'{pct(cargas_car,plan_car_qtd):.1f}%' if plan_car_qtd else '—')
     st.markdown('#### Realizado por turno — Carregamento')
     cols=st.columns(3)
-    for col,t in zip(cols,['T1','T2','T3']):
+    for col,t in zip(cols,['T3','T1','T2']):
         n=0.0; peso=0.0
         if not car.empty and not car[car.turno==t].empty:
             r=car[car.turno==t].iloc[-1]; n=float(r.veiculos_carregados); peso=em_toneladas(r.toneladas_realizadas)
@@ -926,10 +931,13 @@ elif pagina=='📝 Nova Passagem':
 
 elif pagina=='👁️ Visão Atual':
     st.header('👁️ Visão atual')
+    st.caption('CDA 01 e CDA 02: T3 da véspera → T1 → T2. Estoque: escala 2x2.')
     df=query('SELECT * FROM passagens WHERE excluido_em IS NULL ORDER BY id DESC')
     if df.empty: st.info('Ainda não existem passagens salvas.')
     else:
         latest=df.groupby(['operacao','turno'],as_index=False).first()
+        latest['Ordem']=latest['turno'].map({'T3':0,'T1':1,'T2':2,'2X2 1A':3,'2X2 1B':4,'2X2 2A':5,'2X2 2B':6}).fillna(7)
+        latest=latest.sort_values(['operacao','Ordem'])
         for _,r in latest.iterrows():
             with st.expander(f"{r['operacao']} • {nome_turno(r['turno'])} • {r['status']}",expanded=True):
                 if r['operacao']=='Estoque':
