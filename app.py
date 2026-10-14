@@ -19,9 +19,9 @@ HORARIOS_TURNOS = {
 }
 
 def data_ciclo_operacional(data_registro, turno, operacao):
-    """Separação CDA01 e CDA02: T3 na data seguinte; carregamento e estoque: data original."""
+    """Somente Separação CDA 01 desloca T3 para o ciclo seguinte."""
     dia=pd.to_datetime(data_registro).date()
-    if operacao in ('CDA 01 - Separação','CDA 02') and turno=='T3':
+    if operacao in operacao=='CDA 01 - Separação' and turno=='T3':
         return dia+timedelta(days=1)
     return dia
 
@@ -955,7 +955,7 @@ elif pagina=='📝 Nova Passagem':
 
 elif pagina=='👁️ Visão Atual':
     st.header('👁️ Visão atual')
-    st.caption('Separação CDA 01 e CDA 02: T3 → T1 → T2. Carregamento CDA 01: T1 → T2 → T3. Estoque: 2x2.')
+    st.caption('Separação CDA 01: T3 da véspera + T1 + T2. Carregamento CDA 01 e CDA 02: T1 + T2 + T3 da data. Estoque: 2x2.')
     df=query('SELECT * FROM passagens WHERE excluido_em IS NULL ORDER BY id DESC')
     if df.empty: st.info('Ainda não existem passagens salvas.')
     else:
@@ -1008,13 +1008,13 @@ elif pagina=='👔 Visão do Supervisor':
     turnos_disponiveis=['T1','T2','T3'] if op!='Estoque' else ['2X2 1A','2X2 1B','2X2 2A','2X2 2B']
     turno_filtro=st.selectbox('Filtrar turno',['Todos os turnos']+turnos_disponiveis,format_func=lambda x: nome_turno(x) if x!='Todos os turnos' else x,key='sup_turno')
     if turno_filtro=='Todos os turnos':
-        dados=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di-timedelta(days=1)) if op in ('CDA 01 - Separação','CDA 02') else str(di),str(dfim)))
+        dados=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di-timedelta(days=1)) if op=='CDA 01 - Separação' else str(di),str(dfim)))
     else:
-        dados=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND operacao=? AND data BETWEEN ? AND ? AND turno=? ORDER BY id DESC',(op,str(di-timedelta(days=1)) if op in ('CDA 01 - Separação','CDA 02') and turno_filtro=='T3' else str(di),str(dfim),turno_filtro))
+        dados=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND operacao=? AND data BETWEEN ? AND ? AND turno=? ORDER BY id DESC',(op,str(di-timedelta(days=1)) if op=='CDA 01 - Separação' and turno_filtro=='T3' else str(di),str(dfim),turno_filtro))
     if op!='Estoque' and not dados.empty:
         dados['Data_ciclo']=dados.apply(lambda r:data_ciclo_operacional(r['data'],r['turno'],r['operacao']),axis=1)
         dados=dados[(dados['Data_ciclo']>=di)&(dados['Data_ciclo']<=dfim)].copy()
-        st.caption('Separação e CDA 02: T3 da véspera + T1 + T2. Carregamento: T1 + T2 + T3 da data. Estoque: 2x2.')
+        st.caption('Separação CDA 01: T3 da véspera + T1 + T2. Carregamento CDA 01 e CDA 02: T1 + T2 + T3 da data. Estoque: 2x2.')
     if op=='CDA 02':
         st.markdown('#### 🚛 Transbordos — Recebimento e Carregamento')
         st.caption('Dados consultados diretamente do aplicativo de Transbordos, respeitando data e turno. Independem do preenchimento da passagem.')
@@ -1215,7 +1215,7 @@ elif pagina=='📊 Semana':
     if not df.empty:
         df['Data_ciclo']=df.apply(lambda r:data_ciclo_operacional(r['data'],r['turno'],r['operacao']),axis=1)
         df=df[(df['Data_ciclo']>=di)&(df['Data_ciclo']<=dfim)].copy()
-    st.caption('Separação CDA 01 e CDA 02: T3 da véspera + T1 + T2. Carregamento CDA 01: T1 + T2 + T3 do dia. Estoque: 2x2.')
+    st.caption('Separação CDA 01: T3 da véspera + T1 + T2. Carregamento CDA 01 e CDA 02: T1 + T2 + T3 do dia. Estoque: 2x2.')
     if df.empty: st.info('Sem registros no período.')
     else:
         df=df.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
