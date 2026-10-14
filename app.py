@@ -313,7 +313,7 @@ def salvar_edicao_historico(rid, original, alteracoes, autor, motivo):
         if anterior!=original_completo:
             raise ValueError('O registro foi atualizado desde a abertura. Feche e reabra a edição para carregar os valores atuais.')
         if anterior['operacao']=='CDA 02':
-            cur.execute("SELECT id FROM passagens WHERE data=? AND turno=? AND area=? AND operacao=? AND id<>?",
+            cur.execute("SELECT id FROM passagens WHERE excluido_em IS NULL AND data=? AND turno=? AND area=? AND operacao=? AND id<>?",
                         (alteracoes.get('data',anterior['data']),alteracoes.get('turno',anterior['turno']),
                          anterior['area'],anterior['operacao'],int(rid)))
             if cur.fetchone():
@@ -561,7 +561,7 @@ elif pagina=='🎯 Planejado do Dia':
     plan_sep=scalar_plan(d,'DIA','CDA 01 - Separação','Toneladas')
     plan_car_qtd=scalar_plan(d,'DIA','CDA 01 - Carregamento','Veículos')
     if plan_sep>=10000: plan_sep=plan_sep/1000.0
-    dados=query("SELECT * FROM passagens WHERE data=? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d),))
+    dados=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? AND operacao IN ('CDA 01 - Separação','CDA 01 - Carregamento') ORDER BY id",(str(d),))
     if not dados.empty:
         dados=dados.sort_values('id').groupby(['operacao','turno'],as_index=False).tail(1)
     sep=dados[dados.operacao=='CDA 01 - Separação'] if not dados.empty else pd.DataFrame()
@@ -574,7 +574,7 @@ elif pagina=='🎯 Planejado do Dia':
     # soma as equipes das diferentes passagens/operações de cada turno.
     # Mantém somente a passagem mais recente de cada operação/turno para
     # não duplicar uma passagem que tenha sido corrigida/regravada.
-    abs_dia=query("SELECT * FROM passagens WHERE data=? ORDER BY id",(str(d),))
+    abs_dia=query("SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? ORDER BY id",(str(d),))
     hc_geral=0.0; aus_geral=0.0
     abs_turnos={t:(None,0.0,0.0) for t in ['T1','T2','T3']}
     if not abs_dia.empty:
@@ -860,7 +860,7 @@ elif pagina=='📝 Nova Passagem':
     stat=status_auto(len(pend),abs_pct,of,ofensor_grave)
     st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
     passagem_existente=query(
-        'SELECT id,responsavel,criado_em FROM passagens WHERE data=? AND area=? AND operacao=? AND turno=? AND registro_duplicado=FALSE ORDER BY id DESC LIMIT 1',
+        'SELECT id,responsavel,criado_em FROM passagens WHERE excluido_em IS NULL AND data=? AND area=? AND operacao=? AND turno=? AND registro_duplicado=FALSE ORDER BY id DESC LIMIT 1',
         (str(data_reg),area,operacao,turno))
     if not passagem_existente.empty:
         st.error(f'🔒 Esta passagem já foi registrada para {data_reg.strftime("%d/%m/%Y")} — {turno_nome} — {operacao}. Registro nº {int(passagem_existente.iloc[0]["id"])}. Consulte o Histórico; não é permitido enviar novamente.')
@@ -919,7 +919,7 @@ elif pagina=='📝 Nova Passagem':
 
 elif pagina=='👁️ Visão Atual':
     st.header('👁️ Visão atual')
-    df=query('SELECT * FROM passagens ORDER BY id DESC')
+    df=query('SELECT * FROM passagens WHERE excluido_em IS NULL ORDER BY id DESC')
     if df.empty: st.info('Ainda não existem passagens salvas.')
     else:
         latest=df.groupby(['operacao','turno'],as_index=False).first()
@@ -969,9 +969,9 @@ elif pagina=='👔 Visão do Supervisor':
     turnos_disponiveis=['T1','T2','T3'] if op!='Estoque' else ['2X2 1A','2X2 1B','2X2 2A','2X2 2B']
     turno_filtro=st.selectbox('Filtrar turno',['Todos os turnos']+turnos_disponiveis,format_func=lambda x: nome_turno(x) if x!='Todos os turnos' else x,key='sup_turno')
     if turno_filtro=='Todos os turnos':
-        dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di),str(dfim)))
+        dados=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND operacao=? AND data BETWEEN ? AND ? ORDER BY id DESC',(op,str(di),str(dfim)))
     else:
-        dados=query('SELECT * FROM passagens WHERE operacao=? AND data BETWEEN ? AND ? AND turno=? ORDER BY id DESC',(op,str(di),str(dfim),turno_filtro))
+        dados=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND operacao=? AND data BETWEEN ? AND ? AND turno=? ORDER BY id DESC',(op,str(di),str(dfim),turno_filtro))
     if op=='CDA 02':
         st.markdown('#### 🚛 Transbordos — Recebimento e Carregamento')
         st.caption('Dados consultados diretamente do aplicativo de Transbordos, respeitando data e turno. Independem do preenchimento da passagem.')
@@ -1186,7 +1186,7 @@ elif pagina=='🕘 Histórico':
     st.header('🕘 Histórico')
     if 'historico_salvo' in st.session_state:
         st.success(st.session_state.pop('historico_salvo'))
-    df=query('SELECT id,data,turno,operacao,responsavel,status,cargas_realizadas,toneladas_realizadas,veiculos_carregados,veiculos_pendentes,absenteismo,ofensor,observacoes,criado_em FROM passagens ORDER BY id DESC')
+    df=query('SELECT id,data,turno,operacao,responsavel,status,cargas_realizadas,toneladas_realizadas,veiculos_carregados,veiculos_pendentes,absenteismo,ofensor,observacoes,criado_em FROM passagens WHERE excluido_em IS NULL ORDER BY id DESC')
     if df.empty: st.info('Sem registros.')
     else:
         df_exibir=df.copy()
@@ -1203,12 +1203,46 @@ elif pagina=='🕘 Histórico':
             if selecionado is not None:
                 mostrar_resumo_whatsapp(selecionado)
         editar_historico(df)
-        st.caption('🔒 Exclusão de registros permanece desativada para proteger o histórico operacional.')
+        st.divider()
+        with st.expander('🔐 Administração — excluir passagem'):
+            import hmac
+            chave_admin=st.secrets.get('PASSAGEM_ADMIN_EXCLUSAO_SENHA','')
+            if not chave_admin:
+                st.info('Exclusão administrativa ainda não habilitada. Configure PASSAGEM_ADMIN_EXCLUSAO_SENHA nos Secrets do Streamlit; nunca no GitHub.')
+            else:
+                senha_digitada=st.text_input('Senha exclusiva do administrador',type='password',key='senha_exclusao_admin')
+                autorizado=bool(senha_digitada) and hmac.compare_digest(str(senha_digitada),str(chave_admin))
+                if not autorizado:
+                    st.caption('A exclusão exige autenticação administrativa. O acesso normal dos líderes continua sem senha.')
+                else:
+                    opcoes_excluir={int(r.id):f"ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao} • {r.responsavel}" for r in df.itertuples()}
+                    rid_excluir=st.selectbox('Registro para excluir',list(opcoes_excluir),index=None,format_func=lambda x:opcoes_excluir[x],key='id_exclusao')
+                    if rid_excluir is not None:
+                        st.warning(f'A passagem {opcoes_excluir[rid_excluir]} deixará de aparecer nos painéis. Uma cópia será mantida para auditoria.')
+                        motivo_exclusao=st.text_area('Motivo da exclusão (obrigatório)',key='motivo_exclusao')
+                        confirmar_exclusao=st.checkbox('Confirmo a exclusão desta passagem',key='confirmar_exclusao')
+                        if st.button('🗑️ Excluir passagem selecionada',type='primary',disabled=not(confirmar_exclusao and motivo_exclusao.strip()),key='executar_exclusao'):
+                            c=None
+                            try:
+                                c=conn(); cur=c.cursor()
+                                cur.execute('UPDATE passagens SET excluido_em=NOW(), excluido_por=?, motivo_exclusao=? WHERE id=? AND excluido_em IS NULL',('Administrador',motivo_exclusao.strip(),int(rid_excluir)))
+                                alterados=cur._cursor.rowcount
+                                c.commit()
+                                if alterados:
+                                    st.session_state['historico_salvo']=f'Passagem ID {rid_excluir} excluída dos painéis e preservada para auditoria.'
+                                    st.rerun()
+                                else:
+                                    st.warning('Passagem não encontrada ou já excluída.')
+                            except Exception:
+                                if c: c.rollback()
+                                st.error('Não foi possível excluir. Nenhuma exclusão foi confirmada.')
+                            finally:
+                                if c: c.close()
 
 else:
     st.header('🖨️ Passagem consolidada para impressão')
     a,b=st.columns(2); d=a.date_input('Data',agora_operacional().date()); t=b.selectbox('Turno',['T1','T2','T3'])
-    df=query('SELECT * FROM passagens WHERE data=? AND turno=? ORDER BY operacao',(str(d),t))
+    df=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND data=? AND turno=? ORDER BY operacao',(str(d),t))
     if df.empty: st.info('Não há registros para esta data/turno.')
     else:
         df=df.sort_values('id').groupby(['operacao'],as_index=False).tail(1)
