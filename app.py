@@ -663,7 +663,7 @@ elif pagina=='📝 Nova Passagem':
         st.caption(f'{turno_nome}: {inicio} às {fim}. Data sugerida: {data_sugerida.strftime("%d/%m/%Y")}, conforme o início mais recente desse turno.')
     st.caption('O horário real de registro será gravado separadamente, no fuso America/Sao_Paulo. Registros antigos não serão alterados.')
     dias_semana_pt=('segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado','domingo')
-    data_extenso=f'{dias_semana_pt[data_reg.weekday()]}, {data_extenso}'
+    data_extenso=f'{dias_semana_pt[data_reg.weekday()]}, {data_reg.strftime("%d/%m/%Y")}'
     # Destaque visual e dupla validação apenas para datas divergentes.
     st.info(f'📅 **DATA DA PASSAGEM: {data_reg.strftime("%d/%m/%Y")}**  |  **{turno_nome}**  |  {area}')
     data_divergente=(data_reg!=data_sugerida)
