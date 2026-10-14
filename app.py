@@ -812,10 +812,14 @@ elif pagina=='📝 Nova Passagem':
     else:
         st.markdown('### 🏭 Indicadores principais')
         a1,a2=st.columns(2)
-        receb_kg=a1.number_input('Recebimento da Produção (kg)',min_value=0.0,step=100.0,format='%.0f')
+        receb_t=a1.number_input('Recebimento da Produção (toneladas)',min_value=0.0,step=1.0,format='%.3f',help='Exemplo: 121 = 121 toneladas = 121.000 kg')
+        receb_kg=round(receb_t*1000,3)
+        a1.caption(f'Equivale a {receb_kg:,.0f} kg'.replace(',','.'))
         receb_pal=a2.number_input('Paletes recebidos da Produção',min_value=0.0,step=1.0)
         b1,b2=st.columns(2)
-        abast_kg=b1.number_input('Abastecimento do Picking (kg)',min_value=0.0,step=100.0,format='%.0f')
+        abast_t=b1.number_input('Abastecimento do Picking (toneladas)',min_value=0.0,step=1.0,format='%.3f',help='Exemplo: 238 = 238 toneladas = 238.000 kg')
+        abast_kg=round(abast_t*1000,3)
+        b1.caption(f'Equivale a {abast_kg:,.0f} kg'.replace(',','.'))
         abast_pal=b2.number_input('Paletes abastecidos no Picking',min_value=0.0,step=1.0)
 
         st.markdown('### 🚛 Movimentações / tarefas do turno')
