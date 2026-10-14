@@ -143,6 +143,7 @@ def garantir_campos_efetivo():
         cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS afastamentos INTEGER NOT NULL DEFAULT 0')
         cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS folgas INTEGER NOT NULL DEFAULT 0')
         cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS atestados INTEGER NOT NULL DEFAULT 0')
+        cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS reposicoes_recebidas INTEGER NOT NULL DEFAULT 0')
         c.commit()
     except Exception:
         c.rollback()
@@ -256,7 +257,7 @@ def resumo_whatsapp(r,pend):
             m.append('• '+' | '.join(x for x in campos if x))
     hc=float(v('headcount'));au=float(v('ausencias'));ferias=float(v('ferias'));afast=float(v('afastamentos'));folgas_v=float(v('folgas'));atest_v=float(v('atestados'))
     hc_base=max(hc-ferias-afast-folgas_v,0)
-    m += ['','👥 *EQUIPE*',f'• Headcount: {q("headcount")}',f'• Férias: {fmt_qtd(ferias)}',f'• Afastamentos: {fmt_qtd(afast)}',f'• Folgas: {fmt_qtd(folgas_v)}',f'• Atestados: {fmt_qtd(atest_v)}',f'• Efetivo considerado: {fmt_qtd(hc_base)}',f'• Presentes: {q("presentes")}',f'• Ausências: {q("ausencias")}',f'• Absenteísmo: {pct(au+atest_v,hc_base):.1f}%' if hc_base else '• Absenteísmo: não informado','','⚠️ *PRINCIPAL OFENSOR*',str(v('ofensor','Sem ofensor')),'','📝 *OBSERVAÇÕES*',str(v('observacoes','Sem observações') or 'Sem observações')]
+    m += ['','👥 *EQUIPE*',f'• Headcount: {q("headcount")}',f'• Férias: {fmt_qtd(ferias)}',f'• Afastamentos: {fmt_qtd(afast)}',f'• Folgas: {fmt_qtd(folgas_v)}',f'• Atestados: {fmt_qtd(atest_v)}',f'• Efetivo considerado: {fmt_qtd(hc_base)}',f'• Presentes: {q("presentes")}',f'• Ausências: {q("ausencias")}',f'• Absenteísmo: {pct(au+atest_v,hc_base):.1f}%' if hc_base else '• Absenteísmo: não informado',f'• Reposições recebidas: {q("reposicoes_recebidas")}',f'• Reposição necessária: {max(0,hc_base-float(v("presentes"))-float(v("reposicoes_recebidas"))):.0f}','','⚠️ *PRINCIPAL OFENSOR*',str(v('ofensor','Sem ofensor')),'','📝 *OBSERVAÇÕES*',str(v('observacoes','Sem observações') or 'Sem observações')]
     if op=='Estoque' and str(v('pendencias_proximo_turno','')).strip(): m += ['','⏭️ *PRÓXIMO TURNO*',str(v('pendencias_proximo_turno'))]
     m += ['',f'🚦 *STATUS:* {v("status","")}', '━━━━━━━━━━━━━━━━━━━━','✅ Registrado no Passagem de Turno | ADIMAX']
     return '\n'.join(m)
@@ -688,12 +689,19 @@ elif pagina=='📝 Nova Passagem':
     atestados=int(h6.number_input('Atestados médicos',min_value=0,step=1))
     efetivo=max(hc-ferias-afastamentos-folgas,0)
     presentes=max(efetivo-aus-atestados,0)
+    reposicoes_recebidas=int(st.number_input('Reposições recebidas (reforços de outros setores/turnos)',min_value=0,step=1,help='Não reduz o absenteísmo.'))
+    disponiveis=presentes+reposicoes_recebidas
+    reposicao_necessaria=max(0,efetivo-disponiveis)
     abs_pct=((aus+atestados)/efetivo*100) if efetivo else 0
     m1,m2,m3,m4=st.columns(4)
     m1.metric('Efetivo considerado',efetivo)
     m2.metric('Presentes',presentes)
     m3.metric('Férias',ferias)
     m4.metric('Absenteísmo',f'{abs_pct:.1f}%' if efetivo else '—')
+    r1,r2,r3=st.columns(3)
+    r1.metric('Reposições recebidas',reposicoes_recebidas)
+    r2.metric('Efetivo disponível',disponiveis)
+    r3.metric('Reposição ainda necessária',reposicao_necessaria)
     st.caption('Férias e afastamentos são separados das faltas. A classificação de afastamentos deve seguir a regra de RH da empresa.')
     # Passagem enxuta: não exige nomes/motivos individuais das ausências.
     aus_det=[]
@@ -847,6 +855,7 @@ elif pagina=='📝 Nova Passagem':
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS afastamentos INTEGER NOT NULL DEFAULT 0')
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS folgas INTEGER NOT NULL DEFAULT 0')
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS atestados INTEGER NOT NULL DEFAULT 0')
+                cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS reposicoes_recebidas INTEGER NOT NULL DEFAULT 0')
                 cur.execute('''INSERT INTO passagens(
                 criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
                 cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
@@ -858,12 +867,12 @@ elif pagina=='📝 Nova Passagem':
                 reembalo_enviados,reprocesso_enviados,maquinas_paradas,equipamento_parado,problema_equipamento,pendencias_proximo_turno,
                 varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,
                 conf_total_cargas,conf_total_uzs,conf_erros,conf_cargas_conferidas,conf_uzs_conferidas,
-                cargas_aguardando_caixas_cda02,cargas_em_pd,ferias,afastamentos,folgas,atestados
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
+                cargas_aguardando_caixas_cda02,cargas_em_pd,ferias,afastamentos,folgas,atestados,reposicoes_recebidas
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (data,area,operacao,turno) WHERE operacao='CDA 02' DO NOTHING''',
                 (agora_operacional().isoformat(timespec='seconds'),str(data_reg),turno,area,operacao,resp,hc,aus,presentes,abs_pct,
                  cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
                  receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
-                 equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos,folgas,atestados)); pid=cur.lastrowid
+                 equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos,folgas,atestados,reposicoes_recebidas)); pid=cur.lastrowid
                 if pid is None:
                     c.rollback()
                     st.error('Já existe uma passagem do CDA 02 para esta data operacional e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
