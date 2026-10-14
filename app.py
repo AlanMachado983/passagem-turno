@@ -1336,4 +1336,5 @@ else:
             if r['observacoes']: st.write(r['observacoes'])
         st.info('Use a opção de impressão do navegador para imprimir ou salvar esta visão em PDF. Na próxima etapa podemos gerar um PDF A4 formatado diretamente pelo app.')
 
-st.caption('Passagem de Turno ADIMAX • Dados armazenados no PostgreSQL (Supabase).')
+st.divider()
+st.caption('Passagem de Turno ADIMAX  •  Desenvolvido por Alan Machado')
