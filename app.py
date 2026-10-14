@@ -807,6 +807,8 @@ elif pagina=='📝 Nova Passagem':
         for i in range(int(vp)):
             st.markdown(f'**Veículo pendente {i+1}**'); q1,q2=st.columns(2); cg=q1.text_input('Carga',key=f'vcg{i}'); mot=q2.selectbox('Motivo',['Carga não integrada','Separação não iniciada','Veículo não se apresentou','Carga batida / próximo turno','Falta de produto','T.I./Körber','Problema operacional','Outro'],key=f'vmo{i}'); det=st.text_input('Detalhe / observação',key=f'vde{i}'); pend.append((cg,'','Carregamento pendente',mot,det))
     elif operacao=='CDA 02':
+        diferencas_entre_pisos=st.number_input('Diferenças entre pisos (cargas)',value=0,step=1,format='%d',help='Digite positivo ou negativo. Ex.: +5 ou -4.',key='diferencas_entre_pisos')
+        st.caption(f'Valor informado: {diferencas_entre_pisos:+d} cargas')
         pc=scalar_plan(data_reg,turno,operacao,'Cargas'); pp=scalar_plan(data_reg,turno,operacao,'Paletes/UZs')
         x,y,z=st.columns(3); cargas=x.number_input('Cargas separadas',min_value=0.0,step=1.0); uz=y.number_input('Paletes / UZs separados',min_value=0.0,step=1.0); pd_e=z.number_input('P&D Espera',min_value=0.0,step=1.0)
         st.info(f'Planejado: {pc:g} cargas | {pp:g} paletes/UZs')
@@ -935,6 +937,8 @@ elif pagina=='📝 Nova Passagem':
                  cargas,ton,vt,vc,vp,uz,pd_e,trans,ton_est,pal_est,pc,pt,pv,gc,gt,gv,ac,at,av,of,obs,stat,
                  receb_kg,receb_pal,abast_kg,abast_pal,car_desc,car_arm,car_agu,trans_cda02,reemb,reproc,maq_par,
                  equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos,folgas,atestados,reposicoes_recebidas)); pid=cur.lastrowid
+                if pid is not None and operacao=='CDA 02':
+                    cur.execute('UPDATE passagens SET diferencas_entre_pisos=? WHERE id=?',(int(diferencas_entre_pisos),int(pid)))
                 if pid is None:
                     c.rollback()
                     st.error('Já existe uma passagem para esta data, operação e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
@@ -1071,6 +1075,21 @@ elif pagina=='👔 Visão do Supervisor':
                     st.dataframe(pd.DataFrame(detalhe_fluxo),use_container_width=True,hide_index=True)
             elif not erros_consulta:
                 st.info('Sem movimentos de recebimento ou carregamento no período.')
+    if op=='CDA 02' and not dados.empty:
+        st.markdown('#### 📊 Diferenças entre pisos — cargas')
+        st.caption('Valores digitados pelos líderes: positivo (+), negativo (−) ou zero. Não representa perda automaticamente.')
+        dif_pisos=dados.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
+        dif_pisos['Diferença']=pd.to_numeric(dif_pisos['diferencas_entre_pisos'],errors='coerce')
+        dif_pisos=dif_pisos.dropna(subset=['Diferença'])
+        if dif_pisos.empty:
+            st.info('Ainda não há diferenças entre pisos informadas.')
+        else:
+            resumo_pisos=dif_pisos.groupby('turno',as_index=False)['Diferença'].sum()
+            resumo_pisos['ordem']=resumo_pisos['turno'].map({'T1':0,'T2':1,'T3':2}).fillna(3)
+            resumo_pisos=resumo_pisos.sort_values('ordem')
+            st.bar_chart(resumo_pisos.set_index('turno')['Diferença'],x_label='Turno',y_label='Diferença (cargas)')
+            st.metric('Saldo das diferenças no período',f"{int(dif_pisos['Diferença'].sum()):+d} cargas")
+            st.dataframe(dif_pisos[['data','turno','Diferença']].sort_values(['data','turno']).rename(columns={'data':'Data','turno':'Turno'}),hide_index=True,use_container_width=True)
     if dados.empty:
         st.info('Não há passagens registradas para esta área no período selecionado.')
     else:
