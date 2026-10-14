@@ -1128,7 +1128,7 @@ elif pagina=='👔 Visão do Supervisor':
             st.dataframe(est_turnos[['Turno','Passagens','Produção recebida (t)','Paletes_recebidos','Picking abastecido (t)','Paletes_abastecidos']].rename(columns={'Paletes_recebidos':'Paletes recebidos','Paletes_abastecidos':'Paletes abastecidos'}),hide_index=True,use_container_width=True)
             st.warning('Lançamentos antigos com unidade incorreta precisam de correção individual após conferência. O painel não converte automaticamente registros históricos suspeitos.')
         else:
-                dados['Efetivo_abs']=(dados['headcount']-dados['ferias']-dados['afastamentos']-dados['folgas']).clip(lower=0)
+            dados['Efetivo_abs']=(dados['headcount']-dados['ferias']-dados['afastamentos']-dados['folgas']).clip(lower=0)
             por_turno=dados.groupby('turno',as_index=False).agg(Passagens=('id','count'),Movimentos=('Movimentos','sum'),Toneladas=('Volume_t','sum'),Ausencias=('ausencias','sum'),Atestados=('atestados','sum'),Headcount=('Efetivo_abs','sum'))
             por_turno['Turno']=por_turno['turno'].apply(nome_turno)
             por_turno['Absenteísmo (%)']=por_turno.apply(lambda r: round((r['Ausencias']+r['Atestados'])/r['Headcount']*100,1) if r['Headcount'] else 0,axis=1)
