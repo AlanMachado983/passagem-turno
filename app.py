@@ -662,9 +662,24 @@ elif pagina=='📝 Nova Passagem':
         inicio,fim=HORARIOS_TURNOS[turno]
         st.caption(f'{turno_nome}: {inicio} às {fim}. Data sugerida: {data_sugerida.strftime("%d/%m/%Y")}, conforme o início mais recente desse turno.')
     st.caption('O horário real de registro será gravado separadamente, no fuso America/Sao_Paulo. Registros antigos não serão alterados.')
-    data_confirmada=st.checkbox(
-        f'Confirmo a passagem de {turno_nome} na data operacional {data_reg.strftime("%d/%m/%Y")}',
+    # Destaque visual e dupla validação apenas para datas divergentes.
+    st.info(f'📅 **DATA DA PASSAGEM: {data_reg.strftime("%d/%m/%Y")}**  |  **{turno_nome}**  |  {area}')
+    data_divergente=(data_reg!=data_sugerida)
+    if data_divergente:
+        st.warning(
+            f'⚠️ ATENÇÃO: você selecionou **{data_reg.strftime("%d/%m/%Y")}**, '
+            f'mas a data sugerida para este turno é **{data_sugerida.strftime("%d/%m/%Y")}**. '
+            'Confira a data com cuidado antes de salvar.'
+        )
+        confirmou_excecao=st.checkbox(
+            'Estou lançando uma passagem de outra data e conferi que está correta',
+            key=f'confirmar_data_excecao_{resp}_{data_reg.isoformat()}_{data_sugerida.isoformat()}')
+    else:
+        confirmou_excecao=True
+    confirmou_data=st.checkbox(
+        f'Confirmo a passagem de {turno_nome} em **{data_reg.strftime("%d/%m/%Y")}**',
         key=f'confirmar_data_{resp}_{data_reg.isoformat()}_{data_sugerida.isoformat()}')
+    data_confirmada=confirmou_data and confirmou_excecao
     # Permissões operacionais por líder; a área e o turno permanecem automáticos.
     if area=='CDA 01':
         if resp=='ALISON RIBEIRO DE OLIVEIRA':
