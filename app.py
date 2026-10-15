@@ -690,10 +690,15 @@ elif pagina=='📝 Nova Passagem':
     c.text_input('Responsável',value=supervisor,disabled=True)
     instante_formulario=agora_operacional()
     data_sugerida=sugerir_data_operacional(turno,instante_formulario)
-    data_reg=st.date_input(
-        'Data operacional (dia de início do turno)',data_sugerida,
-        key=f'data_operacional_{resp}_{data_sugerida.isoformat()}',
-        help='Data usada no planejamento, nos transbordos e nos painéis. Para lançamento de outro dia, ajuste antes de salvar.')
+    st.success(f'📅 Data operacional automática: **{data_sugerida.strftime("%d/%m/%Y")}** — {turno_nome}')
+    lancamento_retroativo=st.checkbox('Preciso lançar uma passagem de outra data (exceção)',value=False,key=f'retroativo_{resp}_{data_sugerida.isoformat()}')
+    if lancamento_retroativo:
+        data_reg=st.date_input(
+            'Data da passagem excepcional',data_sugerida,
+            key=f'data_operacional_{resp}_{data_sugerida.isoformat()}',
+            help='Altere apenas para registrar uma passagem de outra data.')
+    else:
+        data_reg=data_sugerida
     if turno in HORARIOS_TURNOS:
         inicio,fim=HORARIOS_TURNOS[turno]
         st.caption(f'{turno_nome}: {inicio} às {fim}. Data sugerida: {data_sugerida.strftime("%d/%m/%Y")}, conforme o início mais recente desse turno.')
@@ -701,7 +706,7 @@ elif pagina=='📝 Nova Passagem':
     dias_semana_pt=('segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado','domingo')
     data_extenso=f'{dias_semana_pt[data_reg.weekday()]}, {data_reg.strftime("%d/%m/%Y")}'
     # Destaque visual e dupla validação apenas para datas divergentes.
-    st.info(f'📅 **DATA DA PASSAGEM: {data_reg.strftime("%d/%m/%Y")}**  |  **{turno_nome}**  |  {area}')
+    st.info(f'📅 **DATA DA PASSAGEM: {data_extenso}**  |  **{turno_nome}**  |  {area}')
     data_divergente=(data_reg!=data_sugerida)
     if data_divergente:
         st.warning(
