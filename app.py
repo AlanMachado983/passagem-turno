@@ -690,39 +690,12 @@ elif pagina=='📝 Nova Passagem':
     c.text_input('Responsável',value=supervisor,disabled=True)
     instante_formulario=agora_operacional()
     data_sugerida=sugerir_data_operacional(turno,instante_formulario)
-    st.success(f'📅 Data operacional automática: **{data_sugerida.strftime("%d/%m/%Y")}** — {turno_nome}')
-    lancamento_retroativo=st.checkbox('Preciso lançar uma passagem de outra data (exceção)',value=False,key=f'retroativo_{resp}_{data_sugerida.isoformat()}')
-    if lancamento_retroativo:
-        data_reg=st.date_input(
-            'Data da passagem excepcional',data_sugerida,
-            key=f'data_operacional_{resp}_{data_sugerida.isoformat()}',
-            help='Altere apenas para registrar uma passagem de outra data.')
-    else:
-        data_reg=data_sugerida
-    if turno in HORARIOS_TURNOS:
-        inicio,fim=HORARIOS_TURNOS[turno]
-        st.caption(f'{turno_nome}: {inicio} às {fim}. Data sugerida: {data_sugerida.strftime("%d/%m/%Y")}, conforme o início mais recente desse turno.')
-    st.caption('O horário real de registro será gravado separadamente, no fuso America/Sao_Paulo. Registros antigos não serão alterados.')
+    data_reg=data_sugerida
     dias_semana_pt=('segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado','domingo')
     data_extenso=f'{dias_semana_pt[data_reg.weekday()]}, {data_reg.strftime("%d/%m/%Y")}'
-    # Destaque visual e dupla validação apenas para datas divergentes.
-    st.info(f'📅 **DATA DA PASSAGEM: {data_extenso}**  |  **{turno_nome}**  |  {area}')
-    data_divergente=(data_reg!=data_sugerida)
-    if data_divergente:
-        st.warning(
-            f'⚠️ ATENÇÃO: você selecionou **{data_reg.strftime("%d/%m/%Y")}**, '
-            f'mas a data sugerida para este turno é **{data_sugerida.strftime("%d/%m/%Y")}**. '
-            'Confira a data com cuidado antes de salvar.'
-        )
-        confirmou_excecao=st.checkbox(
-            'Estou lançando uma passagem de outra data e conferi que está correta',
-            key=f'confirmar_data_excecao_{resp}_{data_reg.isoformat()}_{data_sugerida.isoformat()}')
-    else:
-        confirmou_excecao=True
-    confirmou_data=st.checkbox(
-        f'Confirmo a passagem de {turno_nome} em **{data_reg.strftime("%d/%m/%Y")}**',
-        key=f'confirmar_data_{resp}_{data_reg.isoformat()}_{data_sugerida.isoformat()}')
-    data_confirmada=confirmou_data and confirmou_excecao
+    st.info(f'📅 **DATA OPERACIONAL: {data_extenso}** | **{turno_nome}** | {area}')
+    st.caption('Data automática conforme o início do turno. O horário real de registro é salvo separadamente.')
+    data_confirmada=True
     # Permissões operacionais por líder; a área e o turno permanecem automáticos.
     if area=='CDA 01':
         if resp=='ALISON RIBEIRO DE OLIVEIRA':
@@ -761,8 +734,18 @@ elif pagina=='📝 Nova Passagem':
     r2.metric('Presentes',presentes)
     r3.metric('Headcount necessário',hc)
     st.caption('Férias e afastamentos são separados das faltas. A classificação de afastamentos deve seguir a regra de RH da empresa.')
-    # Passagem enxuta: não exige nomes/motivos individuais das ausências.
+    st.markdown('##### 👤 Colaboradores por ocorrência')
+    st.caption('Opcional: informe um nome por linha. A quantidade informada acima continua sendo a referência dos indicadores.')
     aus_det=[]
+    for categoria,quantidade in [('Férias',ferias),('Afastamentos',afastamentos),('Atestados',atestados),('Faltas',aus),('Folgas',folgas)]:
+        if quantidade>0:
+            with st.expander(f'{categoria} — {quantidade} colaborador(es)',expanded=False):
+                nomes=st.text_area(f'Nomes em {categoria} (um por linha)',key=f'nomes_{categoria}_{resp}_{data_reg.isoformat()}',placeholder='Digite um nome por linha',height=90)
+                lista=[nome.strip() for nome in nomes.splitlines() if nome.strip()]
+                if len(lista)>quantidade:
+                    st.warning(f'{len(lista)} nomes informados, mas a quantidade de {categoria.lower()} é {quantidade}.')
+                aus_det.extend((categoria,nome) for nome in lista)
+
 
     cargas=ton=vt=vc=vp=uz=pd_e=trans=ton_est=pal_est=0.0
     varejo_cargas=varejo_ton=transferencias_qtd=transferencias_ton=0.0
@@ -801,7 +784,8 @@ elif pagina=='📝 Nova Passagem':
         st.caption('Pendências no fechamento; não entram na produtividade de cargas separadas.')
         n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1))
         for i in range(n):
-            st.markdown(f'**Pendência {i+1}**'); q1,q2,q3=st.columns(3); cg=q1.text_input('Carga',key=f'pcg{i}'); cli=q2.text_input('Cliente',key=f'pcl{i}'); sit=q3.selectbox('Situação',['P&D','Separação não iniciada','Em separação','Aguardando produto','Outra'],key=f'psi{i}'); q4,q5=st.columns(2); mot=q4.selectbox('Motivo',['Falta de produto','Sistema/Integração','Mão de obra','Equipamento','Qualidade','Operacional','Outro'],key=f'pmo{i}'); det=q5.text_input('Detalhe',key=f'pde{i}'); pend.append((cg,cli,sit,mot,det))
+            cg=st.text_input(f'Número da pasta / carga pendente {i+1}',key=f'pcg{i}',placeholder='Ex.: 162589')
+            pend.append((cg,'','Pendente','',''))
     elif operacao=='CDA 01 - Carregamento':
         pv=0.0
         pt=0.0
@@ -910,6 +894,7 @@ elif pagina=='📝 Nova Passagem':
     if st.button('💾 Salvar passagem',type='primary',use_container_width=True,disabled=not passagem_existente.empty):
         if not resp.strip(): st.error('Informe o responsável pela passagem.')
         elif not data_confirmada: st.error('Confirme a data operacional antes de salvar a passagem.')
+        elif any(len([n for c,n in aus_det if c==categoria])>quantidade for categoria,quantidade in [('Férias',ferias),('Afastamentos',afastamentos),('Atestados',atestados),('Faltas',aus),('Folgas',folgas)]): st.error('A quantidade de nomes não pode superar o total informado na categoria.')
         elif ferias>hc: st.error('Férias não podem superar o headcount.')
         elif afastamentos>hc-ferias: st.error('Férias e afastamentos não podem superar o headcount.')
         elif folgas+atestados+aus>hc-ferias-afastamentos: st.error('Faltas não podem superar o efetivo considerado.')
@@ -950,6 +935,13 @@ elif pagina=='📝 Nova Passagem':
                     c.rollback()
                     st.error('Já existe uma passagem para esta data, operação e turno. O registro existente foi preservado. Consulte o Histórico antes de solicitar uma correção.')
                     st.stop()
+                if aus_det:
+                    cur.execute("""CREATE TABLE IF NOT EXISTS colaboradores_ocorrencias (
+                        id BIGSERIAL PRIMARY KEY, passagem_id BIGINT NOT NULL,
+                        categoria TEXT NOT NULL, nome TEXT NOT NULL
+                    )""")
+                    for categoria,nome in aus_det:
+                        cur.execute('INSERT INTO colaboradores_ocorrencias(passagem_id,categoria,nome) VALUES(?,?,?)',(pid,categoria,nome))
                 for r in pend: cur.execute('INSERT INTO pendencias(passagem_id,carga,cliente,situacao,motivo,descricao) VALUES(?,?,?,?,?,?)',(pid,*r))
                 c.commit();st.session_state['ultima_passagem_whats']=int(pid);st.success('Passagem salva com sucesso.')
             except Exception:
