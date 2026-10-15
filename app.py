@@ -1307,6 +1307,18 @@ elif pagina=='🕘 Histórico':
             selecionado=st.selectbox('Passagem para compartilhar',list(opcoes),index=None,format_func=lambda x:opcoes[x],key='historico_whatsapp')
             if selecionado is not None:
                 mostrar_resumo_whatsapp(selecionado)
+        with st.expander('👥 Consultar nomes de férias, afastamentos, atestados, faltas e folgas'):
+            opcoes_nomes={int(r.id):f'ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao}' for r in df.itertuples()}
+            rid_nomes=st.selectbox('Passagem para consultar os nomes',list(opcoes_nomes),index=None,format_func=lambda x:opcoes_nomes[x],key='historico_nomes')
+            if rid_nomes is not None:
+                try:
+                    nomes_reg=query('SELECT categoria AS "Categoria", nome AS "Colaborador" FROM colaboradores_ocorrencias WHERE passagem_id=? ORDER BY categoria,nome',(int(rid_nomes),))
+                    if nomes_reg.empty:
+                        st.info('Nenhum nome individual informado nesta passagem.')
+                    else:
+                        st.dataframe(nomes_reg,hide_index=True,use_container_width=True)
+                except Exception:
+                    st.info('Nenhum nome individual registrado nesta passagem (recurso disponível para novos lançamentos).')
         editar_historico(df)
         with st.expander('🗑️ Excluir registro do histórico'):
             st.caption('Selecione o registro como na opção Modificar. A exclusão retira a passagem dos indicadores, mas mantém os dados para auditoria.')
