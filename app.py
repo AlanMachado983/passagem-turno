@@ -247,7 +247,7 @@ def resumo_whatsapp(r,pend):
     data=pd.to_datetime(v('data')).strftime('%d/%m/%Y')
     m=['📋 *PASSAGEM DE TURNO | ADIMAX*','━━━━━━━━━━━━━━━━━━━━',f'📅 Data: {data}',f'🏭 Operação: {op}',f'🕒 Turno: {nome_turno(v("turno",""))}',f'👤 Líder: {v("responsavel","")}', '', '📦 *RESULTADOS DO TURNO*']
     if op=='CDA 01 - Separação':
-        m += [f'• Vendas: {q("varejo_cargas")} cargas | {t("varejo_ton")}',f'• Transferências: {q("transferencias_qtd")} | {t("transferencias_ton")}',f'• Total: {q("cargas_realizadas")} operações | {t("toneladas_realizadas")}',f'• Aguardando caixas CDA 02: {q("cargas_aguardando_caixas_cda02")}',f'• Cargas em P&D: {q("cargas_em_pd")}']
+        m += [f'• Vendas: {q("varejo_cargas")} cargas | {t("varejo_ton")}',f'• Transferências: {q("transferencias_qtd")} | {t("transferencias_ton")}',f'• Total: {q("cargas_realizadas")} operações | {t("toneladas_realizadas")}',f'• Aguardando caixas CDA 02: {q("cargas_aguardando_caixas_cda02")}',f'• Cargas em P&D: {q("cargas_em_pd")}',f'• Cargas pendentes: {q("quantidade_cargas_pendentes")}']
     elif op=='CDA 01 - Carregamento':
         m += [f'• Veículos carregados: {q("veiculos_carregados")}',f'• Toneladas carregadas: {t("toneladas_realizadas")}',f'• Veículos pendentes: {q("veiculos_pendentes")}']
     elif op=='CDA 02':
@@ -754,6 +754,7 @@ elif pagina=='📝 Nova Passagem':
     equip_parado=problema_equip=pend_prox=''
     pc=pt=pv=0.0
     pend=[]
+    n=0
     cargas_aguardando_caixas=0
     cargas_em_pd=0
     conf_tc=conf_tu=conf_er=conf_cc=conf_uc=None
@@ -782,10 +783,7 @@ elif pagina=='📝 Nova Passagem':
         cargas_aguardando_caixas=int(p1.number_input('Cargas aguardando caixas do CDA 02',min_value=0,step=1,key='sep_aguardando_caixas'))
         cargas_em_pd=int(p2.number_input('Cargas em P&D',min_value=0,step=1,key='sep_cargas_em_pd'))
         st.caption('Pendências no fechamento; não entram na produtividade de cargas separadas.')
-        n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1))
-        for i in range(n):
-            cg=st.text_input(f'Número da pasta / carga pendente {i+1}',key=f'pcg{i}',placeholder='Ex.: 162589')
-            pend.append((cg,'','Pendente','',''))
+        n=int(st.number_input('Quantidade de cargas pendentes',min_value=0,step=1,help='Informe apenas o total. Não é necessário cadastrar cada carga.'))
     elif operacao=='CDA 01 - Carregamento':
         pv=0.0
         pt=0.0
@@ -884,7 +882,7 @@ elif pagina=='📝 Nova Passagem':
     of=st.selectbox('Principal ofensor',['Sem ofensor','Falta de produto/estoque','Mão de obra','Sistema/Integração','WMS/Körber','Atraso/ausência de veículo','Equipamento','Qualidade','Retrabalho','Operacional','Outro'])
     obs=st.text_area('Observações / detalhes do ofensor / pontos de atenção para o próximo turno',height=220,placeholder='Descreva o que aconteceu, o impacto na operação, as ações tomadas e o que o próximo turno precisa acompanhar...')
     ofensor_grave=st.checkbox('🚨 Ofensor grave: comprometeu a operação',value=False,help='Marque somente em caso de ocorrência com impacto operacional grave, como paralisação ou bloqueio relevante.')
-    stat=status_auto(len(pend),abs_pct,of,ofensor_grave)
+    stat=status_auto(n if operacao=='CDA 01 - Separação' else len(pend),abs_pct,of,ofensor_grave)
     st.markdown(f'<div class="status">Status sugerido: {stat}</div>',unsafe_allow_html=True)
     passagem_existente=query(
         'SELECT id,responsavel,criado_em FROM passagens WHERE excluido_em IS NULL AND data=? AND area=? AND operacao=? AND turno=? AND registro_duplicado=FALSE ORDER BY id DESC LIMIT 1',
@@ -910,6 +908,7 @@ elif pagina=='📝 Nova Passagem':
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS folgas INTEGER NOT NULL DEFAULT 0')
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS atestados INTEGER NOT NULL DEFAULT 0')
                 cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS reposicoes_recebidas INTEGER NOT NULL DEFAULT 0')
+                cur.execute('ALTER TABLE passagens ADD COLUMN IF NOT EXISTS quantidade_cargas_pendentes INTEGER NOT NULL DEFAULT 0')
                 cur.execute('''INSERT INTO passagens(
                 criado_em,data,turno,area,operacao,responsavel,headcount,ausencias,presentes,absenteismo,
                 cargas_realizadas,toneladas_realizadas,veiculos_trabalhados,veiculos_carregados,veiculos_pendentes,
@@ -929,6 +928,8 @@ elif pagina=='📝 Nova Passagem':
                  equip_parado,problema_equip,pend_prox,varejo_cargas,varejo_ton,transferencias_qtd,transferencias_ton,conf_tc,conf_tu,conf_er,conf_cc,conf_uc,cargas_aguardando_caixas,cargas_em_pd,ferias,afastamentos,folgas,atestados,reposicoes_recebidas)); pid=cur.lastrowid
                 if pid is not None:
                     cur.execute('UPDATE passagens SET vagas_contratacao=? WHERE id=?',(int(vagas_contratacao),int(pid)))
+                    if operacao=='CDA 01 - Separação':
+                        cur.execute('UPDATE passagens SET quantidade_cargas_pendentes=? WHERE id=?',(int(n),int(pid)))
                 if pid is not None and operacao=='CDA 02':
                     cur.execute('UPDATE passagens SET diferencas_entre_pisos=? WHERE id=?',(int(diferencas_entre_pisos),int(pid)))
                 if pid is None:
