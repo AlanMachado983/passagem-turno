@@ -1120,7 +1120,7 @@ elif pagina=='👔 Visão do Supervisor':
         total_ferias=int(dados['ferias'].sum())
         total_afast=int(dados['afastamentos'].sum())
         total_faltas=int((dados['ausencias']+dados['atestados']).sum())
-        total_presentes=max(0,int(total_hc)-total_faltas-int(dados['atestados'].sum()))
+        total_presentes=max(0,int(total_hc)-total_faltas)
         e1,e2,e3=st.columns(3)
         e1.metric('Headcount previsto',total_previsto)
         e2.metric('Férias',total_ferias)
