@@ -21,7 +21,7 @@ HORARIOS_TURNOS = {
 def data_ciclo_operacional(data_registro, turno, operacao):
     """Somente Separação CDA 01 desloca T3 para o ciclo seguinte."""
     dia=pd.to_datetime(data_registro).date()
-    if operacao in operacao=='CDA 01 - Separação' and turno=='T3':
+    if operacao=='CDA 01 - Separação' and turno=='T3':
         return dia+timedelta(days=1)
     return dia
 
@@ -1241,7 +1241,10 @@ elif pagina=='👔 Visão do Supervisor':
             ciclo_resumo=ciclo.groupby('Data do ciclo',as_index=False).agg(Movimentos=('Movimentos','sum'),Toneladas=('Volume_t','sum'))
             st.dataframe(ciclo_resumo,hide_index=True,use_container_width=True)
         st.markdown('#### Últimas passagens')
-        st.dataframe(dados.sort_values('id',ascending=False)[['data','turno','responsavel','status','absenteismo']].rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','status':'Status','absenteismo':'Absenteísmo (%)'}),hide_index=True,use_container_width=True)
+        ultimas=dados.sort_values('id',ascending=False)[['data','turno','responsavel','status','absenteismo']].copy()
+        ultimas['absenteismo']=pd.to_numeric(ultimas['absenteismo'],errors='coerce').apply(lambda v: f'{v:.2f}%'.replace('.',',') if pd.notna(v) else '—')
+        ultimas['data']=pd.to_datetime(ultimas['data']).dt.strftime('%d/%m/%Y')
+        st.dataframe(ultimas.rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','status':'Status','absenteismo':'Absenteísmo'}),hide_index=True,use_container_width=True)
 
 elif pagina=='📊 Semana':
     st.header('📊 Resumo semanal')
