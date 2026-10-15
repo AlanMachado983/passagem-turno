@@ -813,7 +813,7 @@ elif pagina=='📝 Nova Passagem':
             st.markdown(f'**Veículo pendente {i+1}**'); q1,q2=st.columns(2); cg=q1.text_input('Carga',key=f'vcg{i}'); mot=q2.selectbox('Motivo',['Carga não integrada','Separação não iniciada','Veículo não se apresentou','Carga batida / próximo turno','Falta de produto','T.I./Körber','Problema operacional','Outro'],key=f'vmo{i}'); det=st.text_input('Detalhe / observação',key=f'vde{i}'); pend.append((cg,'','Carregamento pendente',mot,det))
     elif operacao=='CDA 02':
         diferencas_entre_pisos=st.number_input('Diferenças entre pisos (cargas)',value=0,step=1,format='%d',help='Digite positivo ou negativo. Ex.: +5 ou -4.',key='diferencas_entre_pisos')
-        st.caption(f'Valor informado: {diferencas_entre_pisos:+d} cargas')
+        st.caption(f'Valor informado: {diferencas_entre_pisos:+d} cargas. Convenção do placar: positivo = CDA 01 à frente; negativo = CDA 02 à frente; zero = empatados.')
         pc=scalar_plan(data_reg,turno,operacao,'Cargas'); pp=scalar_plan(data_reg,turno,operacao,'Paletes/UZs')
         x,y,z=st.columns(3); cargas=x.number_input('Cargas separadas',min_value=0.0,step=1.0); uz=y.number_input('Paletes / UZs separados',min_value=0.0,step=1.0); pd_e=z.number_input('P&D Espera',min_value=0.0,step=1.0)
         st.info(f'Planejado: {pc:g} cargas | {pp:g} paletes/UZs')
@@ -1083,20 +1083,34 @@ elif pagina=='👔 Visão do Supervisor':
             elif not erros_consulta:
                 st.info('Sem movimentos de recebimento ou carregamento no período.')
     if op=='CDA 02' and not dados.empty:
-        st.markdown('#### 📊 Diferenças entre pisos — cargas')
-        st.caption('Valores digitados pelos líderes: positivo (+), negativo (−) ou zero. Não representa perda automaticamente.')
+        st.markdown('#### 🏁 Placar entre pisos — CDA 01 × CDA 02')
+        st.caption('Convenção: saldo positivo indica CDA 01 à frente; saldo negativo indica CDA 02 à frente. É um saldo informado no fechamento, não a quantidade produzida em cada piso.')
         dif_pisos=dados.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
         dif_pisos['Diferença']=pd.to_numeric(dif_pisos['diferencas_entre_pisos'],errors='coerce')
-        dif_pisos=dif_pisos.dropna(subset=['Diferença'])
+        dif_pisos=dif_pisos.dropna(subset=['Diferença']).copy()
         if dif_pisos.empty:
             st.info('Ainda não há diferenças entre pisos informadas.')
         else:
-            resumo_pisos=dif_pisos.groupby('turno',as_index=False)['Diferença'].sum()
-            resumo_pisos['ordem']=resumo_pisos['turno'].map({'T1':0,'T2':1,'T3':2}).fillna(3)
-            resumo_pisos=resumo_pisos.sort_values('ordem')
-            st.bar_chart(resumo_pisos.set_index('turno')['Diferença'],x_label='Turno',y_label='Diferença (cargas)')
-            st.metric('Saldo das diferenças no período',f"{int(dif_pisos['Diferença'].sum()):+d} cargas")
-            st.dataframe(dif_pisos[['data','turno','Diferença']].sort_values(['data','turno']).rename(columns={'data':'Data','turno':'Turno'}),hide_index=True,use_container_width=True)
+            dif_pisos['Data']=pd.to_datetime(dif_pisos['data'])
+            ordem_turnos={'T1':0,'T2':1,'T3':2}
+            dif_pisos['ordem']=dif_pisos['turno'].map(ordem_turnos).fillna(9)
+            dif_pisos=dif_pisos.sort_values(['Data','ordem','id'])
+            ultimo=dif_pisos.iloc[-1]
+            saldo=int(ultimo['Diferença'])
+            lider='CDA 01' if saldo>0 else 'CDA 02' if saldo<0 else 'Empate'
+            c1,c2,c3=st.columns(3)
+            c1.metric('Último saldo registrado',f'{saldo:+d} cargas')
+            c2.metric('Quem está à frente',lider)
+            c3.metric('Vantagem',f'{abs(saldo)} cargas')
+            st.caption(f"Última passagem considerada: {ultimo['Data'].strftime('%d/%m/%Y')} — {nome_turno(ultimo['turno'])}. O saldo não é somado entre turnos, pois representa uma posição no fechamento.")
+            dif_pisos['À frente']=dif_pisos['Diferença'].apply(lambda v:'CDA 01' if v>0 else 'CDA 02' if v<0 else 'Empate')
+            dif_pisos['Vantagem (cargas)']=dif_pisos['Diferença'].abs().astype(int)
+            dif_pisos['Data / Turno']=dif_pisos['Data'].dt.strftime('%d/%m/%Y')+' • '+dif_pisos['turno'].map(nome_turno)
+            st.markdown('##### Evolução dos saldos por passagem')
+            st.line_chart(dif_pisos.set_index('Data / Turno')['Diferença'],y_label='Saldo informado (cargas)')
+            st.markdown('##### Quem terminou cada turno à frente')
+            st.dataframe(dif_pisos[['Data / Turno','Diferença','À frente','Vantagem (cargas)']].rename(columns={'Diferença':'Saldo (+ CDA 01 / − CDA 02)'}),hide_index=True,use_container_width=True)
+            st.caption('Para períodos com vários dias, cada ponto mostra o fechamento de um turno; não somamos os saldos para evitar contar a mesma diferença repetidamente.')
     if dados.empty:
         st.info('Não há passagens registradas para esta área no período selecionado.')
     else:
