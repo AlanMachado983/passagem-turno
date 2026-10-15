@@ -709,15 +709,31 @@ elif pagina=='📝 Nova Passagem':
         operacao='CDA 02' if area=='CDA 02' else 'Estoque'
 
     st.subheader('👥 Equipe')
+    aus_det=[]
+    def campos_nomes(container,categoria,quantidade):
+        """Campos compactos logo abaixo do indicador numérico."""
+        for i in range(quantidade):
+            nome=container.text_input(
+                f'{categoria} — nome {i+1}',
+                key=f'nome_{categoria}_{i}_{resp}_{data_reg.isoformat()}',
+                placeholder=f'Nome do colaborador {i+1}',
+                label_visibility='collapsed')
+            if nome.strip():
+                aus_det.append((categoria,nome.strip()))
     h1,h2=st.columns(2)
     hc=int(h1.number_input('Headcount previsto do turno',min_value=0,step=1))
     ferias=int(h2.number_input('Férias (não contam como falta)',min_value=0,step=1))
+    campos_nomes(h2,'Férias',ferias)
     h3,h4=st.columns(2)
     afastamentos=int(h3.number_input('Afastamentos (não contam como falta)',min_value=0,step=1))
+    campos_nomes(h3,'Afastamentos',afastamentos)
     aus=int(h4.number_input('Faltas / ausências não programadas',min_value=0,step=1))
+    campos_nomes(h4,'Faltas',aus)
     h5,h6=st.columns(2)
     folgas=int(h5.number_input('Folgas programadas',min_value=0,step=1))
+    campos_nomes(h5,'Folgas',folgas)
     atestados=int(h6.number_input('Atestados médicos',min_value=0,step=1))
+    campos_nomes(h6,'Atestados',atestados)
     efetivo=max(hc-ferias-afastamentos-folgas,0)
     presentes=max(efetivo-aus-atestados,0)
     vagas_contratacao=int(st.number_input('Vagas para contratação',min_value=0,step=1,help='Informe quantas vagas estão abertas neste turno. Não altera o cálculo do absenteísmo.'))
@@ -734,19 +750,6 @@ elif pagina=='📝 Nova Passagem':
     r2.metric('Presentes',presentes)
     r3.metric('Headcount necessário',hc)
     st.caption('Férias e afastamentos são separados das faltas. A classificação de afastamentos deve seguir a regra de RH da empresa.')
-    st.markdown('##### 👤 Colaboradores por ocorrência')
-    st.caption('Opcional: informe um nome por linha. A quantidade informada acima continua sendo a referência dos indicadores.')
-    aus_det=[]
-    for categoria,quantidade in [('Férias',ferias),('Afastamentos',afastamentos),('Atestados',atestados),('Faltas',aus),('Folgas',folgas)]:
-        if quantidade>0:
-            with st.expander(f'{categoria} — {quantidade} colaborador(es)',expanded=False):
-                nomes=st.text_area(f'Nomes em {categoria} (um por linha)',key=f'nomes_{categoria}_{resp}_{data_reg.isoformat()}',placeholder='Digite um nome por linha',height=90)
-                lista=[nome.strip() for nome in nomes.splitlines() if nome.strip()]
-                if len(lista)>quantidade:
-                    st.warning(f'{len(lista)} nomes informados, mas a quantidade de {categoria.lower()} é {quantidade}.')
-                aus_det.extend((categoria,nome) for nome in lista)
-
-
     cargas=ton=vt=vc=vp=uz=pd_e=trans=ton_est=pal_est=0.0
     varejo_cargas=varejo_ton=transferencias_qtd=transferencias_ton=0.0
     receb_kg=receb_pal=abast_kg=abast_pal=0.0
