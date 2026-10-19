@@ -1579,6 +1579,78 @@ elif pagina=='🕘 Histórico':
                         st.dataframe(nomes_reg,hide_index=True,use_container_width=True)
                 except Exception:
                     st.info('Nenhum nome individual registrado nesta passagem (recurso disponível para novos lançamentos).')
+        with st.expander('✏️ Correção rápida — falta / atestado',expanded=False):
+            st.caption('Corrija apenas a classificação da ocorrência, sem refazer a passagem. O histórico da alteração será preservado.')
+            opcoes_corr={int(r.id):f'ID {r.id} • {r.data} • {nome_turno(r.turno)} • {r.operacao} • {r.responsavel}' for r in df.itertuples()}
+            rid_corr=st.selectbox('Selecione a passagem',list(opcoes_corr),index=None,format_func=lambda x:opcoes_corr[x],key='corr_rapida_passagem')
+            if rid_corr is not None:
+                try:
+                    pessoas_corr=query(
+                        "SELECT id,nome,categoria FROM colaboradores_ocorrencias WHERE passagem_id=? AND categoria IN ('Faltas','Atestados') ORDER BY nome,id",
+                        (int(rid_corr),))
+                    if pessoas_corr.empty:
+                        st.info('Esta passagem não possui nomes individuais de faltas ou atestados para corrigir.')
+                    else:
+                        opcoes_pessoas={int(r.id):f'{r.nome} • {r.categoria}' for r in pessoas_corr.itertuples()}
+                        id_pessoa=st.selectbox('Colaborador',list(opcoes_pessoas),index=None,format_func=lambda x:opcoes_pessoas[x],key='corr_rapida_colaborador')
+                        if id_pessoa is not None:
+                            pessoa=pessoas_corr[pessoas_corr['id']==id_pessoa].iloc[0]
+                            origem=str(pessoa['categoria'])
+                            destino='Atestados' if origem=='Faltas' else 'Faltas'
+                            st.info(f"{pessoa['nome']}: **{origem} → {destino}**")
+                            autor_corr=st.text_input('Líder que está corrigindo',value=str(df.loc[df['id']==rid_corr,'responsavel'].iloc[0]),key=f'corr_autor_{rid_corr}')
+                            motivo_corr=st.text_input('Motivo',value='Atestado apresentado após a passagem' if origem=='Faltas' else '',key=f'corr_motivo_{rid_corr}_{id_pessoa}')
+                            confirma_corr=st.checkbox('Confirmo a correção desta ocorrência',key=f'corr_confirma_{rid_corr}_{id_pessoa}')
+                            if st.button('✅ Salvar correção',key='corr_rapida_salvar',type='primary',
+                                         disabled=not(autor_corr.strip() and motivo_corr.strip() and confirma_corr)):
+                                conexao_corr=None
+                                try:
+                                    import json
+                                    conexao_corr=conn()
+                                    cursor_corr=conexao_corr.cursor()
+                                    cursor_corr.execute('SELECT id,ausencias,atestados,headcount,ferias,afastamentos,folgas FROM passagens WHERE id=? AND excluido_em IS NULL FOR UPDATE',(int(rid_corr),))
+                                    registro_corr=cursor_corr.fetchone()
+                                    if not registro_corr:
+                                        raise ValueError('Passagem não encontrada ou excluída.')
+                                    cursor_corr.execute('SELECT categoria,nome FROM colaboradores_ocorrencias WHERE id=? AND passagem_id=? FOR UPDATE',(int(id_pessoa),int(rid_corr)))
+                                    pessoa_atual=cursor_corr.fetchone()
+                                    if not pessoa_atual or pessoa_atual[0]!=origem:
+                                        raise ValueError('A ocorrência foi alterada. Atualize a tela e tente novamente.')
+                                    novas_faltas=int(registro_corr[1] or 0)+(-1 if origem=='Faltas' else 1)
+                                    novos_atestados=int(registro_corr[2] or 0)+(1 if origem=='Faltas' else -1)
+                                    if min(novas_faltas,novos_atestados)<0:
+                                        raise ValueError('A passagem possui totais inconsistentes; solicite revisão antes de corrigir.')
+                                    efetivo_corr=max(0,int(registro_corr[3] or 0)-int(registro_corr[4] or 0)-int(registro_corr[5] or 0)-int(registro_corr[6] or 0))
+                                    novo_pct=(novas_faltas+novos_atestados)/efetivo_corr*100 if efetivo_corr else 0
+                                    novos_presentes=max(0,efetivo_corr-novas_faltas-novos_atestados)
+                                    cursor_corr.execute("""CREATE TABLE IF NOT EXISTS ocorrencias_revisoes (
+                                        id BIGSERIAL PRIMARY KEY, passagem_id BIGINT NOT NULL,
+                                        ocorrencia_id BIGINT NOT NULL, nome TEXT NOT NULL,
+                                        categoria_anterior TEXT NOT NULL, categoria_nova TEXT NOT NULL,
+                                        autor TEXT NOT NULL, motivo TEXT NOT NULL,
+                                        alterado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                                    )""")
+                                    cursor_corr.execute('UPDATE colaboradores_ocorrencias SET categoria=? WHERE id=? AND passagem_id=?',
+                                                        (destino,int(id_pessoa),int(rid_corr)))
+                                    cursor_corr.execute('UPDATE passagens SET ausencias=?,atestados=?,presentes=?,absenteismo=? WHERE id=?',
+                                                        (novas_faltas,novos_atestados,novos_presentes,novo_pct,int(rid_corr)))
+                                    cursor_corr.execute("""INSERT INTO ocorrencias_revisoes
+                                        (passagem_id,ocorrencia_id,nome,categoria_anterior,categoria_nova,autor,motivo)
+                                        VALUES(?,?,?,?,?,?,?)""",
+                                        (int(rid_corr),int(id_pessoa),str(pessoa_atual[1]),origem,destino,autor_corr.strip(),motivo_corr.strip()))
+                                    conexao_corr.commit()
+                                    st.session_state['historico_salvo']=f'Correção salva: {pessoa_atual[1]} — {origem} → {destino}. Rankings e totais atualizados.'
+                                    st.rerun()
+                                except ValueError as erro_corr:
+                                    if conexao_corr: conexao_corr.rollback()
+                                    st.error(str(erro_corr))
+                                except Exception:
+                                    if conexao_corr: conexao_corr.rollback()
+                                    st.error('Não foi possível salvar a correção. Nenhum dado foi alterado.')
+                                finally:
+                                    if conexao_corr: conexao_corr.close()
+                except Exception:
+                    st.warning('Não foi possível consultar as ocorrências desta passagem.')
         editar_historico(df)
         with st.expander('🗑️ Excluir registro do histórico'):
             st.caption('Selecione o registro como na opção Modificar. A exclusão retira a passagem dos indicadores, mas mantém os dados para auditoria.')
