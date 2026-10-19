@@ -1100,11 +1100,15 @@ elif pagina=='🏢 Torre de Controle':
                                 st.info('Nenhum colaborador identificado nesta categoria e período.')
                             else:
                                 ranking_pessoas=(filtradas.groupby('Colaborador',as_index=False)
-                                    .agg(Ocorrências=('passagem_id','count'))
+                                    .agg(Ocorrências=('passagem_id','count'),
+                                         Setor=('Operação',lambda x:', '.join(sorted(set(x.dropna().astype(str))))),
+                                         Turno=('Turno',lambda x:', '.join(sorted(set(x.dropna().astype(str))))))
                                     .sort_values(['Ocorrências','Colaborador'],ascending=[False,True])
                                     .reset_index(drop=True))
                                 ranking_pessoas.insert(0,'Posição',range(1,len(ranking_pessoas)+1))
+                                ranking_pessoas=ranking_pessoas[['Posição','Colaborador','Setor','Turno','Ocorrências']]
                                 st.dataframe(ranking_pessoas,hide_index=True,use_container_width=True)
+                                st.caption('Setor e turno correspondem às passagens onde houve registro; não necessariamente à lotação oficial do colaborador.')
                                 st.markdown('##### Histórico nominal')
                                 st.dataframe(filtradas[['Data','Turno','Operação','Colaborador']].sort_values('Data',ascending=False),
                                              hide_index=True,use_container_width=True)
