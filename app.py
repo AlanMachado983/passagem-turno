@@ -1438,39 +1438,92 @@ elif pagina=='👔 Visão do Supervisor':
         st.dataframe(ultimas.rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','status':'Status','absenteismo':'Absenteísmo'}),hide_index=True,use_container_width=True)
 
 elif pagina=='📊 Semana':
-    st.header('📊 Resumo semanal')
-    hoje=agora_operacional().date(); ini=hoje-timedelta(days=hoje.weekday()); fim=ini+timedelta(days=6)
-    a,b=st.columns(2); di=a.date_input('Início',ini); dfim=b.date_input('Fim',fim)
-    df=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND data BETWEEN ? AND ? ORDER BY data',(str(di-timedelta(days=1)),str(dfim)))
+    st.header('📊 Relatório Semanal | Logística')
+    st.caption('Resumo executivo da semana para a coordenação. Indicadores por operação, sem misturar unidades.')
+    hoje=agora_operacional().date()
+    ini=hoje-timedelta(days=hoje.weekday())
+    fim=ini+timedelta(days=6)
+    a,b=st.columns(2)
+    di=a.date_input('Início',ini,key='semana_inicio')
+    dfim=b.date_input('Fim',fim,key='semana_fim')
+    if di>dfim:
+        st.warning('A data inicial deve ser anterior ou igual à final.')
+        st.stop()
+    df=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND data BETWEEN ? AND ? ORDER BY id',
+             (str(di-timedelta(days=1)),str(dfim)))
     if not df.empty:
+        df=df.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
         df['Data_ciclo']=df.apply(lambda r:data_ciclo_operacional(r['data'],r['turno'],r['operacao']),axis=1)
         df=df[(df['Data_ciclo']>=di)&(df['Data_ciclo']<=dfim)].copy()
-    st.caption('Separação CDA 01: T3 da véspera + T1 + T2. Carregamento CDA 01 e CDA 02: T1 + T2 + T3 do dia. Estoque: 2x2.')
-    if df.empty: st.info('Sem registros no período.')
+    st.caption('Separação CDA 01: T3 da véspera + T1 + T2. Carregamento CDA 01: T1 + T2 + T3. CDA 02: data do registro. Estoque: escala 2x2.')
+    if df.empty:
+        st.info('Não há passagens registradas nos ciclos selecionados.')
     else:
-        df=df.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
-        df['Toneladas_exibicao']=df.apply(lambda r: em_toneladas(r['toneladas_realizadas']) if r['operacao'] in ['CDA 01 - Separação','CDA 01 - Carregamento'] else em_toneladas(r['toneladas_estoque']),axis=1)
-        df['Cargas_exibicao']=df.apply(lambda r: r['veiculos_carregados'] if r['operacao']=='CDA 01 - Carregamento' else r['cargas_realizadas'],axis=1)
-        c1,c2,c3,c4=st.columns(4)
-        hc_total=float((df.headcount-df.ferias-df.afastamentos-df.folgas).clip(lower=0).sum()); aus_total=float((df.ausencias+df.atestados).sum())
-        c1.metric('Passagens',len(df)); c2.metric('Cargas',f"{df.Cargas_exibicao.sum():g}"); c3.metric('Toneladas por operação','Ver detalhamento'); c4.metric('Absenteísmo',f"{(aus_total/hc_total*100):.1f}%" if hc_total else '—')
-        chart=df.groupby(['Data_ciclo','operacao'],as_index=False).agg(Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'))
-        st.markdown('#### Evolução diária de toneladas por operação'); st.line_chart(chart.pivot(index='Data_ciclo',columns='operacao',values='Toneladas').fillna(0))
-        df['Efetivo_abs']=(df['headcount']-df['ferias']-df['afastamentos']-df['folgas']).clip(lower=0)
-        df['Ausencias_abs']=df['ausencias']+df['atestados']
-        por_op=df.groupby('operacao',as_index=False).agg(Passagens=('id','count'),Cargas=('Cargas_exibicao','sum'),Toneladas=('Toneladas_exibicao','sum'),Efetivo=('Efetivo_abs','sum'),Ausencias=('Ausencias_abs','sum'))
-        por_op['Absenteísmo (%)']=por_op.apply(lambda r: round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else 0,axis=1)
-        por_op=por_op.drop(columns=['Efetivo','Ausencias'])
-        st.markdown('#### Por operação (sem somar Separação e Carregamento)'); st.dataframe(por_op,use_container_width=True,hide_index=True)
-        est=df[df.operacao=='Estoque'].copy()
-        if not est.empty:
-            st.markdown('#### 📦 Estoque — Produção × Picking por turno')
-            est_res=est.groupby('turno',as_index=False).agg(
-                Recebimento_kg=('recebimento_producao_kg','sum'),
-                Recebimento_paletes=('recebimento_producao_paletes','sum'),
-                Abastecimento_kg=('abastecimento_picking_kg','sum'),
-                Abastecimento_paletes=('abastecimento_picking_paletes','sum'))
-            st.dataframe(est_res,use_container_width=True,hide_index=True)
+        df['Efetivo_abs']=(pd.to_numeric(df['headcount'],errors='coerce').fillna(0)
+            -pd.to_numeric(df['ferias'],errors='coerce').fillna(0)
+            -pd.to_numeric(df['afastamentos'],errors='coerce').fillna(0)
+            -pd.to_numeric(df['folgas'],errors='coerce').fillna(0)).clip(lower=0)
+        df['Ausencias_abs']=(pd.to_numeric(df['ausencias'],errors='coerce').fillna(0)
+            +pd.to_numeric(df['atestados'],errors='coerce').fillna(0))
+        efetivo=df['Efetivo_abs'].sum()
+        ausencias=df['Ausencias_abs'].sum()
+        w1,w2,w3,w4=st.columns(4)
+        w1.metric('Passagens registradas',fmt_qtd(len(df)))
+        w2.metric('Faltas',fmt_qtd(df['ausencias'].sum()))
+        w3.metric('Atestados',fmt_qtd(df['atestados'].sum()))
+        w4.metric('Absenteísmo',f'{100*ausencias/efetivo:.2f}%'.replace('.',',') if efetivo else '—')
+        st.caption('Absenteísmo = (faltas + atestados) ÷ efetivo considerado. Os números representam passagens registradas, não uma lista completa de turnos previstos.')
+        st.markdown('#### 📦 Resultado por operação')
+        operacoes_semana=['CDA 01 - Separação','CDA 01 - Carregamento','CDA 02','Estoque']
+        for operacao_semana in operacoes_semana:
+            parte=df[df['operacao']==operacao_semana].copy()
+            with st.expander(f'{operacao_semana} — {len(parte)} passagem(ns)',expanded=not parte.empty):
+                if parte.empty:
+                    st.info('Sem lançamentos no período.')
+                    continue
+                if operacao_semana=='Estoque':
+                    x,y,z=st.columns(3)
+                    x.metric('Produção recebida',fmt_t(parte['recebimento_producao_kg'].sum()/1000))
+                    y.metric('Picking abastecido',fmt_t(parte['abastecimento_picking_kg'].sum()/1000))
+                    z.metric('Paletes recebidos',fmt_qtd(parte['recebimento_producao_paletes'].sum()))
+                    evol=parte.groupby('Data_ciclo')[['recebimento_producao_kg','abastecimento_picking_kg']].sum()/1000
+                    evol=evol.rename(columns={'recebimento_producao_kg':'Produção recebida (t)','abastecimento_picking_kg':'Picking abastecido (t)'})
+                    st.line_chart(evol)
+                    st.caption('Dados em toneladas convertidos dos kg registrados; pesos históricos incorretos não são ajustados automaticamente.')
+                elif operacao_semana=='CDA 01 - Carregamento':
+                    x,y=st.columns(2)
+                    x.metric('Veículos carregados',fmt_qtd(parte['veiculos_carregados'].sum()))
+                    y.metric('Toneladas informadas',fmt_t(parte['toneladas_realizadas'].apply(em_toneladas).sum()))
+                    st.bar_chart(parte.groupby('Data_ciclo')['veiculos_carregados'].sum(),y_label='Veículos carregados')
+                else:
+                    x,y=st.columns(2)
+                    x.metric('Cargas separadas',fmt_qtd(parte['cargas_realizadas'].sum()))
+                    if operacao_semana=='CDA 01 - Separação':
+                        y.metric('Toneladas informadas',fmt_t(parte['toneladas_realizadas'].apply(em_toneladas).sum()))
+                    else:
+                        y.metric('Paletes / UZs',fmt_qtd(parte['uz_paletes'].sum()))
+                    st.bar_chart(parte.groupby('Data_ciclo')['cargas_realizadas'].sum(),y_label='Cargas separadas')
+                st.markdown('**Comparativo dos turnos**')
+                turnos=parte.groupby('turno',as_index=False).agg(Passagens=('id','count'),Efetivo=('Efetivo_abs','sum'),Ausencias=('Ausencias_abs','sum'))
+                turnos['Turno']=turnos['turno'].apply(nome_turno)
+                turnos['Absenteísmo (%)']=turnos.apply(lambda r:round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
+                st.dataframe(turnos[['Turno','Passagens','Efetivo','Ausencias','Absenteísmo (%)']].rename(columns={'Ausencias':'Faltas + atestados'}),hide_index=True,use_container_width=True)
+        st.markdown('#### 👥 Pessoas e quadro')
+        quadro=df.groupby('operacao',as_index=False).agg(Passagens=('id','count'),Efetivo=('Efetivo_abs','sum'),Faltas=('ausencias','sum'),Atestados=('atestados','sum'))
+        quadro['Absenteísmo (%)']=quadro.apply(lambda r:round(100*(r['Faltas']+r['Atestados'])/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
+        st.dataframe(quadro.rename(columns={'operacao':'Operação'}),hide_index=True,use_container_width=True)
+        if 'vagas_contratacao' in df.columns:
+            vagas=df.sort_values('id').groupby(['operacao','turno'],as_index=False).tail(1)
+            st.markdown('##### Últimas vagas informadas por operação e turno')
+            st.dataframe(vagas[['operacao','turno','vagas_contratacao']].rename(columns={'operacao':'Operação','turno':'Turno','vagas_contratacao':'Vagas abertas'}),hide_index=True,use_container_width=True)
+            st.caption('Vagas não são somadas entre dias: exibimos o último valor informado por operação e turno.')
+        st.markdown('#### ⚠️ Ocorrências que exigem atenção')
+        atencao=df[df['status'].astype(str).str.contains('Atenção|Crítico|Critico',case=False,na=False)]
+        if atencao.empty:
+            st.success('Nenhuma passagem com status de atenção ou crítico neste período.')
+        else:
+            st.dataframe(atencao[['Data_ciclo','operacao','turno','status','ofensor']].rename(columns={'Data_ciclo':'Data do ciclo','operacao':'Operação','turno':'Turno','status':'Status','ofensor':'Ofensor'}),hide_index=True,use_container_width=True)
+        st.caption('Passagens ausentes não são interpretadas como zero. Os resultados dependem dos dados informados pelos líderes.')
 
 elif pagina=='🕘 Histórico':
     st.header('🕘 Histórico')
