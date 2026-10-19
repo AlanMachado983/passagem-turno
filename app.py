@@ -1049,76 +1049,7 @@ elif pagina=='🏢 Torre de Controle':
                                 st.metric('Volume informado',fmt_t(parte['toneladas_realizadas'].apply(em_toneladas).sum()))
                             else:
                                 st.metric('Paletes / UZs',fmt_qtd(parte['uz_paletes'].sum()))
-            st.markdown('#### Absenteísmo por operação')
-            por_area=base_torre.groupby('operacao',as_index=False).agg(Efetivo=('Efetivo','sum'),Ausencias=('Ausencias_total','sum'),Passagens=('id','count'))
-            por_area['Absenteísmo (%)']=por_area.apply(lambda r:round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
-            st.dataframe(por_area.rename(columns={'operacao':'Operação','Ausencias':'Faltas + atestados'}),hide_index=True,use_container_width=True)
-            st.markdown('#### Comparativo de turnos')
-            por_turno_torre=base_torre.groupby(['operacao','turno'],as_index=False).agg(Passagens=('id','count'),Efetivo=('Efetivo','sum'),Ausencias=('Ausencias_total','sum'))
-            por_turno_torre['Turno']=por_turno_torre['turno'].apply(nome_turno)
-            por_turno_torre['Absenteísmo (%)']=por_turno_torre.apply(lambda r:round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
-            st.dataframe(por_turno_torre[['operacao','Turno','Passagens','Efetivo','Ausencias','Absenteísmo (%)']].rename(columns={'operacao':'Operação','Ausencias':'Faltas + atestados'}),hide_index=True,use_container_width=True)
-            st.markdown('#### 👥 Gestão de Pessoas | Logística Geral')
-            st.caption('Ranking nominal de faltas e atestados registrados pelos líderes. Uso gerencial restrito e sem classificação automática de desempenho.')
-            areas_pessoas=sorted(base_torre['operacao'].dropna().unique().tolist())
-            filtro_areas=st.multiselect('Operações para o ranking',areas_pessoas,default=areas_pessoas,key='torre_filtro_areas_pessoas')
-            filtro_turnos=st.multiselect('Turnos para o ranking',['T1','T2','T3'],default=['T1','T2','T3'],format_func=nome_turno,key='torre_filtro_turnos_pessoas')
-            dados_pessoas=base_torre[base_torre['operacao'].isin(filtro_areas)&base_torre['turno'].isin(filtro_turnos)].copy()
-            if dados_pessoas.empty:
-                st.info('Nenhuma passagem corresponde aos filtros de pessoas.')
-            else:
-                ids_pessoas=[int(x) for x in dados_pessoas['id'].dropna().tolist()]
-                try:
-                    marcadores_pessoas=','.join(['?']*len(ids_pessoas))
-                    ocorrencias_pessoas=query(
-                        'SELECT co.passagem_id,co.categoria,co.nome,p.data,p.turno,p.operacao,p.responsavel '
-                        'FROM colaboradores_ocorrencias co JOIN passagens p ON p.id=co.passagem_id '
-                        'WHERE p.excluido_em IS NULL AND co.passagem_id IN ('+marcadores_pessoas+') '
-                        "AND co.categoria IN ('Faltas','Atestados')",
-                        tuple(ids_pessoas))
-                    if not ocorrencias_pessoas.empty:
-                        ocorrencias_pessoas['Colaborador']=ocorrencias_pessoas['nome'].astype(str).str.strip().str.replace(r'\\s+',' ',regex=True).str.upper()
-                        ocorrencias_pessoas=ocorrencias_pessoas[ocorrencias_pessoas['Colaborador']!=''].drop_duplicates(subset=['passagem_id','categoria','Colaborador'])
-                        ocorrencias_pessoas['Data']=pd.to_datetime(ocorrencias_pessoas['data']).dt.strftime('%d/%m/%Y')
-                        ocorrencias_pessoas['Turno']=ocorrencias_pessoas['turno'].apply(nome_turno)
-                        ocorrencias_pessoas=ocorrencias_pessoas.rename(columns={'operacao':'Operação','categoria':'Ocorrência','responsavel':'Líder responsável'})
-                    totais_esperados={
-                        'Faltas':int(pd.to_numeric(dados_pessoas['ausencias'],errors='coerce').fillna(0).sum()),
-                        'Atestados':int(pd.to_numeric(dados_pessoas['atestados'],errors='coerce').fillna(0).sum())
-                    }
-                    tabs_pessoas=st.tabs(['📉 Ranking de faltas','🩺 Ranking de atestados'])
-                    for tab_pessoas,categoria_pessoas in zip(tabs_pessoas,['Faltas','Atestados']):
-                        with tab_pessoas:
-                            filtradas=ocorrencias_pessoas[ocorrencias_pessoas['Ocorrência']==categoria_pessoas].copy() if not ocorrencias_pessoas.empty else pd.DataFrame()
-                            total_identificado=len(filtradas)
-                            total_sem_nome=max(0,totais_esperados[categoria_pessoas]-total_identificado)
-                            p1,p2,p3=st.columns(3)
-                            p1.metric('Ocorrências informadas',totais_esperados[categoria_pessoas])
-                            p2.metric('Com nome identificado',total_identificado)
-                            p3.metric('Sem nome identificado',total_sem_nome)
-                            if filtradas.empty:
-                                st.info('Nenhum colaborador identificado nesta categoria e período.')
-                            else:
-                                ranking_pessoas=(filtradas.groupby('Colaborador',as_index=False)
-                                    .agg(Ocorrências=('passagem_id','count'),
-                                         Setor=('Operação',lambda x:', '.join(sorted(set(x.dropna().astype(str))))),
-                                         Turno=('Turno',lambda x:', '.join(sorted(set(x.dropna().astype(str))))),
-                                         Líderes=('Líder responsável',lambda x:', '.join(sorted(set(x.dropna().astype(str))))))
-                                    .sort_values(['Ocorrências','Colaborador'],ascending=[False,True])
-                                    .reset_index(drop=True))
-                                ranking_pessoas.insert(0,'Posição',range(1,len(ranking_pessoas)+1))
-                                ranking_pessoas=ranking_pessoas[['Posição','Colaborador','Setor','Turno','Ocorrências','Líderes']]
-                                st.dataframe(ranking_pessoas,hide_index=True,use_container_width=True)
-                                st.caption('Setor e turno correspondem às passagens onde houve registro; não necessariamente à lotação oficial do colaborador.')
-                                st.markdown('##### Histórico nominal')
-                                st.dataframe(filtradas[['Data','Turno','Operação','Colaborador','Líder responsável']].sort_values('Data',ascending=False),
-                                             hide_index=True,use_container_width=True)
-                            if total_sem_nome:
-                                st.warning('Parte dos registros não possui nome informado. O ranking nominal é parcial.')
-                    st.caption('Uma ocorrência por colaborador, categoria e passagem. Grafias diferentes podem gerar entradas distintas; atestados não indicam, por si, irregularidade.')
-                except Exception:
-                    st.info('Os registros nominais ainda não estão disponíveis para consulta. Os totais de ausências permanecem inalterados.')
-            st.markdown('#### Atenção operacional')
+            st.markdown('#### 🚦 Situação que exige atenção')
             pendentes_torre=base_torre[base_torre['status'].astype(str).str.contains('Atenção|Crítico|Critico',case=False,na=False)]
             if pendentes_torre.empty:
                 st.success('Nenhuma passagem sinalizada com status de atenção ou crítico no período.')
@@ -1128,6 +1059,78 @@ elif pagina=='🏢 Torre de Controle':
                 avisos['Data_ciclo']=avisos['Data_ciclo'].astype(str)
                 avisos['turno']=avisos['turno'].apply(nome_turno)
                 st.dataframe(avisos.rename(columns={'Data_ciclo':'Data do ciclo','operacao':'Operação','turno':'Turno','status':'Status','ofensor':'Ofensor'}),hide_index=True,use_container_width=True)
+            st.markdown('#### 📦 Resultados e análises')
+            with st.expander('📊 Detalhes de absenteísmo e turnos',expanded=False):
+                st.markdown('#### Absenteísmo por operação')
+                por_area=base_torre.groupby('operacao',as_index=False).agg(Efetivo=('Efetivo','sum'),Ausencias=('Ausencias_total','sum'),Passagens=('id','count'))
+                por_area['Absenteísmo (%)']=por_area.apply(lambda r:round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
+                st.dataframe(por_area.rename(columns={'operacao':'Operação','Ausencias':'Faltas + atestados'}),hide_index=True,use_container_width=True)
+                st.markdown('#### Comparativo de turnos')
+                por_turno_torre=base_torre.groupby(['operacao','turno'],as_index=False).agg(Passagens=('id','count'),Efetivo=('Efetivo','sum'),Ausencias=('Ausencias_total','sum'))
+                por_turno_torre['Turno']=por_turno_torre['turno'].apply(nome_turno)
+                por_turno_torre['Absenteísmo (%)']=por_turno_torre.apply(lambda r:round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
+                st.dataframe(por_turno_torre[['operacao','Turno','Passagens','Efetivo','Ausencias','Absenteísmo (%)']].rename(columns={'operacao':'Operação','Ausencias':'Faltas + atestados'}),hide_index=True,use_container_width=True)
+            with st.expander('👥 Rankings de faltas e atestados',expanded=False):
+                st.markdown('#### 👥 Gestão de Pessoas | Logística Geral')
+                st.caption('Ranking nominal de faltas e atestados registrados pelos líderes. Uso gerencial restrito e sem classificação automática de desempenho.')
+                areas_pessoas=sorted(base_torre['operacao'].dropna().unique().tolist())
+                filtro_areas=st.multiselect('Operações para o ranking',areas_pessoas,default=areas_pessoas,key='torre_filtro_areas_pessoas')
+                filtro_turnos=st.multiselect('Turnos para o ranking',['T1','T2','T3'],default=['T1','T2','T3'],format_func=nome_turno,key='torre_filtro_turnos_pessoas')
+                dados_pessoas=base_torre[base_torre['operacao'].isin(filtro_areas)&base_torre['turno'].isin(filtro_turnos)].copy()
+                if dados_pessoas.empty:
+                    st.info('Nenhuma passagem corresponde aos filtros de pessoas.')
+                else:
+                    ids_pessoas=[int(x) for x in dados_pessoas['id'].dropna().tolist()]
+                    try:
+                        marcadores_pessoas=','.join(['?']*len(ids_pessoas))
+                        ocorrencias_pessoas=query(
+                            'SELECT co.passagem_id,co.categoria,co.nome,p.data,p.turno,p.operacao,p.responsavel '
+                            'FROM colaboradores_ocorrencias co JOIN passagens p ON p.id=co.passagem_id '
+                            'WHERE p.excluido_em IS NULL AND co.passagem_id IN ('+marcadores_pessoas+') '
+                            "AND co.categoria IN ('Faltas','Atestados')",
+                            tuple(ids_pessoas))
+                        if not ocorrencias_pessoas.empty:
+                            ocorrencias_pessoas['Colaborador']=ocorrencias_pessoas['nome'].astype(str).str.strip().str.replace(r'\\s+',' ',regex=True).str.upper()
+                            ocorrencias_pessoas=ocorrencias_pessoas[ocorrencias_pessoas['Colaborador']!=''].drop_duplicates(subset=['passagem_id','categoria','Colaborador'])
+                            ocorrencias_pessoas['Data']=pd.to_datetime(ocorrencias_pessoas['data']).dt.strftime('%d/%m/%Y')
+                            ocorrencias_pessoas['Turno']=ocorrencias_pessoas['turno'].apply(nome_turno)
+                            ocorrencias_pessoas=ocorrencias_pessoas.rename(columns={'operacao':'Operação','categoria':'Ocorrência','responsavel':'Líder responsável'})
+                        totais_esperados={
+                            'Faltas':int(pd.to_numeric(dados_pessoas['ausencias'],errors='coerce').fillna(0).sum()),
+                            'Atestados':int(pd.to_numeric(dados_pessoas['atestados'],errors='coerce').fillna(0).sum())
+                        }
+                        tabs_pessoas=st.tabs(['📉 Ranking de faltas','🩺 Ranking de atestados'])
+                        for tab_pessoas,categoria_pessoas in zip(tabs_pessoas,['Faltas','Atestados']):
+                            with tab_pessoas:
+                                filtradas=ocorrencias_pessoas[ocorrencias_pessoas['Ocorrência']==categoria_pessoas].copy() if not ocorrencias_pessoas.empty else pd.DataFrame()
+                                total_identificado=len(filtradas)
+                                total_sem_nome=max(0,totais_esperados[categoria_pessoas]-total_identificado)
+                                p1,p2,p3=st.columns(3)
+                                p1.metric('Ocorrências informadas',totais_esperados[categoria_pessoas])
+                                p2.metric('Com nome identificado',total_identificado)
+                                p3.metric('Sem nome identificado',total_sem_nome)
+                                if filtradas.empty:
+                                    st.info('Nenhum colaborador identificado nesta categoria e período.')
+                                else:
+                                    ranking_pessoas=(filtradas.groupby('Colaborador',as_index=False)
+                                        .agg(Ocorrências=('passagem_id','count'),
+                                             Setor=('Operação',lambda x:', '.join(sorted(set(x.dropna().astype(str))))),
+                                             Turno=('Turno',lambda x:', '.join(sorted(set(x.dropna().astype(str))))),
+                                             Líderes=('Líder responsável',lambda x:', '.join(sorted(set(x.dropna().astype(str))))))
+                                        .sort_values(['Ocorrências','Colaborador'],ascending=[False,True])
+                                        .reset_index(drop=True))
+                                    ranking_pessoas.insert(0,'Posição',range(1,len(ranking_pessoas)+1))
+                                    ranking_pessoas=ranking_pessoas[['Posição','Colaborador','Setor','Turno','Ocorrências','Líderes']]
+                                    st.dataframe(ranking_pessoas,hide_index=True,use_container_width=True)
+                                    st.caption('Setor e turno correspondem às passagens onde houve registro; não necessariamente à lotação oficial do colaborador.')
+                                    st.markdown('##### Histórico nominal')
+                                    st.dataframe(filtradas[['Data','Turno','Operação','Colaborador','Líder responsável']].sort_values('Data',ascending=False),
+                                                 hide_index=True,use_container_width=True)
+                                if total_sem_nome:
+                                    st.warning('Parte dos registros não possui nome informado. O ranking nominal é parcial.')
+                        st.caption('Uma ocorrência por colaborador, categoria e passagem. Grafias diferentes podem gerar entradas distintas; atestados não indicam, por si, irregularidade.')
+                    except Exception:
+                        st.info('Os registros nominais ainda não estão disponíveis para consulta. Os totais de ausências permanecem inalterados.')
             st.caption('A ausência de um registro não significa produção zero. A Torre utiliza apenas passagens efetivamente registradas.')
 
 elif pagina=='👔 Visão do Supervisor':
@@ -1491,6 +1494,7 @@ elif pagina=='📊 Semana':
         else:
             st.write('**Pessoas:** nenhuma falta ou atestado informado nas passagens recebidas.')
         st.caption('Abaixo estão os detalhes para conferência. Expanda apenas a operação desejada.')
+        st.caption('Abra somente o setor que deseja analisar. Os detalhes ficam recolhidos para facilitar a leitura.')
         st.markdown('#### 📦 Resultado por operação')
         operacoes_semana=['CDA 01 - Separação','CDA 01 - Carregamento','CDA 02','Estoque']
         for operacao_semana in operacoes_semana:
