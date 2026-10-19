@@ -1071,7 +1071,7 @@ elif pagina=='🏢 Torre de Controle':
                 try:
                     marcadores_pessoas=','.join(['?']*len(ids_pessoas))
                     ocorrencias_pessoas=query(
-                        'SELECT co.passagem_id,co.categoria,co.nome,p.data,p.turno,p.operacao '
+                        'SELECT co.passagem_id,co.categoria,co.nome,p.data,p.turno,p.operacao,p.responsavel '
                         'FROM colaboradores_ocorrencias co JOIN passagens p ON p.id=co.passagem_id '
                         'WHERE p.excluido_em IS NULL AND co.passagem_id IN ('+marcadores_pessoas+') '
                         "AND co.categoria IN ('Faltas','Atestados')",
@@ -1081,7 +1081,7 @@ elif pagina=='🏢 Torre de Controle':
                         ocorrencias_pessoas=ocorrencias_pessoas[ocorrencias_pessoas['Colaborador']!=''].drop_duplicates(subset=['passagem_id','categoria','Colaborador'])
                         ocorrencias_pessoas['Data']=pd.to_datetime(ocorrencias_pessoas['data']).dt.strftime('%d/%m/%Y')
                         ocorrencias_pessoas['Turno']=ocorrencias_pessoas['turno'].apply(nome_turno)
-                        ocorrencias_pessoas=ocorrencias_pessoas.rename(columns={'operacao':'Operação','categoria':'Ocorrência'})
+                        ocorrencias_pessoas=ocorrencias_pessoas.rename(columns={'operacao':'Operação','categoria':'Ocorrência','responsavel':'Líder responsável'})
                     totais_esperados={
                         'Faltas':int(pd.to_numeric(dados_pessoas['ausencias'],errors='coerce').fillna(0).sum()),
                         'Atestados':int(pd.to_numeric(dados_pessoas['atestados'],errors='coerce').fillna(0).sum())
@@ -1102,15 +1102,16 @@ elif pagina=='🏢 Torre de Controle':
                                 ranking_pessoas=(filtradas.groupby('Colaborador',as_index=False)
                                     .agg(Ocorrências=('passagem_id','count'),
                                          Setor=('Operação',lambda x:', '.join(sorted(set(x.dropna().astype(str))))),
-                                         Turno=('Turno',lambda x:', '.join(sorted(set(x.dropna().astype(str))))))
+                                         Turno=('Turno',lambda x:', '.join(sorted(set(x.dropna().astype(str))))),
+                                         Líderes=('Líder responsável',lambda x:', '.join(sorted(set(x.dropna().astype(str))))))
                                     .sort_values(['Ocorrências','Colaborador'],ascending=[False,True])
                                     .reset_index(drop=True))
                                 ranking_pessoas.insert(0,'Posição',range(1,len(ranking_pessoas)+1))
-                                ranking_pessoas=ranking_pessoas[['Posição','Colaborador','Setor','Turno','Ocorrências']]
+                                ranking_pessoas=ranking_pessoas[['Posição','Colaborador','Setor','Turno','Ocorrências','Líderes']]
                                 st.dataframe(ranking_pessoas,hide_index=True,use_container_width=True)
                                 st.caption('Setor e turno correspondem às passagens onde houve registro; não necessariamente à lotação oficial do colaborador.')
                                 st.markdown('##### Histórico nominal')
-                                st.dataframe(filtradas[['Data','Turno','Operação','Colaborador']].sort_values('Data',ascending=False),
+                                st.dataframe(filtradas[['Data','Turno','Operação','Colaborador','Líder responsável']].sort_values('Data',ascending=False),
                                              hide_index=True,use_container_width=True)
                             if total_sem_nome:
                                 st.warning('Parte dos registros não possui nome informado. O ranking nominal é parcial.')
