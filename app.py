@@ -1018,13 +1018,14 @@ elif pagina=='🏢 Torre de Controle':
                 +pd.to_numeric(base_torre['atestados'],errors='coerce').fillna(0))
             total_efetivo=base_torre['Efetivo'].sum()
             total_ausencias=base_torre['Ausencias_total'].sum()
-            vagas_total=pd.to_numeric(base_torre['vagas_contratacao'],errors='coerce').fillna(0).sum() if 'vagas_contratacao' in base_torre else 0
+            vagas_ultimas=(base_torre.sort_values('id').groupby(['operacao','turno'],as_index=False).tail(1) if 'vagas_contratacao' in base_torre else pd.DataFrame())
+            vagas_total=pd.to_numeric(vagas_ultimas['vagas_contratacao'],errors='coerce').fillna(0).sum() if not vagas_ultimas.empty else 0
             k1,k2,k3,k4=st.columns(4)
             k1.metric('Passagens recebidas',len(base_torre))
-            k2.metric('Absenteísmo consolidado',f'{100*total_ausencias/total_efetivo:.2f}%'.replace('.',',') if total_efetivo else '—')
+            k2.metric('Absenteísmo por passagens',f'{100*total_ausencias/total_efetivo:.2f}%'.replace('.',',') if total_efetivo else '—')
             k3.metric('Faltas + atestados',fmt_qtd(total_ausencias))
-            k4.metric('Vagas informadas',fmt_qtd(vagas_total))
-            st.caption('O absenteísmo usa a soma das ausências dividida pelo efetivo considerado. Vagas são somadas por passagem no período, não representam vagas únicas da empresa.')
+            k4.metric('Vagas — últimos registros',fmt_qtd(vagas_total))
+            st.caption('Absenteísmo calculado por passagens: a mesma pessoa pode aparecer em operações diferentes. Vagas usam o último registro por operação/turno e podem se repetir entre setores; não equivalem a vagas únicas.')
             st.markdown('#### Resultados por operação')
             operacoes_torre=['CDA 01 - Separação','CDA 01 - Carregamento','CDA 02','Estoque']
             cards_torre=st.columns(2)
@@ -1471,13 +1472,30 @@ elif pagina=='📊 Semana':
         w1.metric('Passagens registradas',fmt_qtd(len(df)))
         w2.metric('Faltas',fmt_qtd(df['ausencias'].sum()))
         w3.metric('Atestados',fmt_qtd(df['atestados'].sum()))
-        w4.metric('Absenteísmo',f'{100*ausencias/efetivo:.2f}%'.replace('.',',') if efetivo else '—')
-        st.caption('Absenteísmo = (faltas + atestados) ÷ efetivo considerado. Os números representam passagens registradas, não uma lista completa de turnos previstos.')
+        w4.metric('Absenteísmo por passagens',f'{100*ausencias/efetivo:.2f}%'.replace('.',',') if efetivo else '—')
+        st.caption('Absenteísmo = (faltas + atestados) ÷ efetivo considerado das passagens. Pode haver duplicidade de pessoas entre operações; não equivale necessariamente ao índice oficial de RH.')
+        st.markdown('#### 🧭 Leitura gerencial da semana')
+        st.caption('Síntese automática baseada nas passagens recebidas. Não substitui validação dos líderes nem dados oficiais de RH.')
+        dias_registrados=df['Data_ciclo'].nunique()
+        areas_ativas=df['operacao'].nunique()
+        alertas_semana=df[df['status'].astype(str).str.contains('Atenção|Crítico|Critico',case=False,na=False)]
+        st.write(f'**Cobertura registrada:** {len(df)} passagens em {dias_registrados} dia(s) de ciclo e {areas_ativas} operação(ões). Não é possível afirmar cobertura completa sem confrontar a escala prevista.')
+        if len(alertas_semana):
+            por_alerta=alertas_semana.groupby('operacao').size().sort_values(ascending=False)
+            st.warning(f'**Ponto de atenção:** {len(alertas_semana)} passagem(ns) sinalizada(s). Maior concentração: {por_alerta.index[0]} ({int(por_alerta.iloc[0])}).')
+        else:
+            st.success('Nenhuma passagem recebida foi sinalizada com status de atenção ou crítico.')
+        if ausencias:
+            por_ausencia=df.groupby('operacao')['Ausencias_abs'].sum().sort_values(ascending=False)
+            st.write(f'**Pessoas:** {int(ausencias)} ocorrência(s) de falta/atestado informada(s). Maior volume de registros: {por_ausencia.index[0]} ({int(por_ausencia.iloc[0])}). Compare com o efetivo antes de avaliar a gravidade.')
+        else:
+            st.write('**Pessoas:** nenhuma falta ou atestado informado nas passagens recebidas.')
+        st.caption('Abaixo estão os detalhes para conferência. Expanda apenas a operação desejada.')
         st.markdown('#### 📦 Resultado por operação')
         operacoes_semana=['CDA 01 - Separação','CDA 01 - Carregamento','CDA 02','Estoque']
         for operacao_semana in operacoes_semana:
             parte=df[df['operacao']==operacao_semana].copy()
-            with st.expander(f'{operacao_semana} — {len(parte)} passagem(ns)',expanded=not parte.empty):
+            with st.expander(f'{operacao_semana} — {len(parte)} passagem(ns)',expanded=False):
                 if parte.empty:
                     st.info('Sem lançamentos no período.')
                     continue
