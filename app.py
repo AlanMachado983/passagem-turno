@@ -794,8 +794,7 @@ elif pagina=='📝 Nova Passagem':
         vc=x.number_input('Veículos carregados',min_value=0.0,step=1.0)
         vp=y.number_input('Veículos para o próximo turno',min_value=0.0,step=1.0)
         ton=z.number_input('Toneladas carregadas no turno (t)',min_value=0.0,step=0.1,format='%.3f')
-        for i in range(int(vp)):
-            st.markdown(f'**Veículo pendente {i+1}**'); q1,q2=st.columns(2); cg=q1.text_input('Carga',key=f'vcg{i}'); mot=q2.selectbox('Motivo',['Carga não integrada','Separação não iniciada','Veículo não se apresentou','Carga batida / próximo turno','Falta de produto','T.I./Körber','Problema operacional','Outro'],key=f'vmo{i}'); det=st.text_input('Detalhe / observação',key=f'vde{i}'); pend.append((cg,'','Carregamento pendente',mot,det))
+        st.caption('Informe somente a quantidade de veículos/cargas pendentes para o próximo turno. Não é necessário detalhar cada carga.')
     elif operacao=='CDA 02':
         diferencas_entre_pisos=st.number_input('Diferenças entre pisos (cargas)',value=0,step=1,format='%d',help='Digite positivo ou negativo. Ex.: +5 ou -4.',key='diferencas_entre_pisos')
         st.caption(f'Valor informado: {diferencas_entre_pisos:+d} cargas. Convenção do placar: positivo = CDA 01 à frente; negativo = CDA 02 à frente; zero = empatados.')
