@@ -506,7 +506,7 @@ with st.sidebar:
     st.image(str(APP_DIR / 'static' / 'icon-192.png'), width=144)
     st.markdown('## ADIMAX')
     if os.path.exists('assets/caminhoes.png'): st.image('assets/caminhoes.png',use_container_width=True)
-    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','👔 Visão do Supervisor','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
+    pagina=st.radio('Navegação',['📝 Nova Passagem','📋 Planejamento','🎯 Planejado do Dia','👁️ Visão Atual','👔 Visão do Supervisor','🏢 Torre de Controle','📊 Semana','🕘 Histórico','🖨️ Imprimir'])
     with st.expander('📲 Adicionar à tela inicial'):
         st.markdown(
             '**Android (Chrome):** abra o menu ⋮ e procure '
@@ -988,6 +988,87 @@ elif pagina=='👁️ Visão Atual':
                     c3.metric('Cargas',f"{cargas_visao:g}")
                     c4.metric('Toneladas',f"{ton_visao:.1f} t")
                 if r['observacoes']: st.write(r['observacoes'])
+
+elif pagina=='🏢 Torre de Controle':
+    st.header('🏢 Torre de Controle | ADIMAX')
+    st.caption('Visão executiva integrada: CDA 01 Separação, CDA 01 Carregamento, CDA 02 e Estoque. A seleção da aba não restringe acesso.')
+    hoje_torre=agora_operacional().date()
+    ct1,ct2=st.columns(2)
+    inicio_torre=ct1.date_input('Início do período',hoje_torre-timedelta(days=6),key='torre_inicio')
+    fim_torre=ct2.date_input('Fim do período',hoje_torre,key='torre_fim')
+    if inicio_torre>fim_torre:
+        st.warning('A data inicial não pode ser posterior à final.')
+        st.stop()
+    # A Separação usa o T3 da véspera para compor o ciclo seguinte.
+    base_torre=query('SELECT * FROM passagens WHERE excluido_em IS NULL AND data BETWEEN ? AND ? ORDER BY id',
+                     (str(inicio_torre-timedelta(days=1)),str(fim_torre)))
+    if base_torre.empty:
+        st.info('Nenhuma passagem registrada neste período.')
+    else:
+        base_torre=base_torre.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
+        base_torre['Data_ciclo']=base_torre.apply(lambda r:data_ciclo_operacional(r['data'],r['turno'],r['operacao']),axis=1)
+        base_torre=base_torre[(base_torre['Data_ciclo']>=inicio_torre)&(base_torre['Data_ciclo']<=fim_torre)].copy()
+        if base_torre.empty:
+            st.info('Nenhuma passagem pertence aos ciclos operacionais selecionados.')
+        else:
+            base_torre['Efetivo']=(pd.to_numeric(base_torre['headcount'],errors='coerce').fillna(0)
+                -pd.to_numeric(base_torre['ferias'],errors='coerce').fillna(0)
+                -pd.to_numeric(base_torre['afastamentos'],errors='coerce').fillna(0)
+                -pd.to_numeric(base_torre['folgas'],errors='coerce').fillna(0)).clip(lower=0)
+            base_torre['Ausencias_total']=(pd.to_numeric(base_torre['ausencias'],errors='coerce').fillna(0)
+                +pd.to_numeric(base_torre['atestados'],errors='coerce').fillna(0))
+            total_efetivo=base_torre['Efetivo'].sum()
+            total_ausencias=base_torre['Ausencias_total'].sum()
+            vagas_total=pd.to_numeric(base_torre['vagas_contratacao'],errors='coerce').fillna(0).sum() if 'vagas_contratacao' in base_torre else 0
+            k1,k2,k3,k4=st.columns(4)
+            k1.metric('Passagens recebidas',len(base_torre))
+            k2.metric('Absenteísmo consolidado',f'{100*total_ausencias/total_efetivo:.2f}%'.replace('.',',') if total_efetivo else '—')
+            k3.metric('Faltas + atestados',fmt_qtd(total_ausencias))
+            k4.metric('Vagas informadas',fmt_qtd(vagas_total))
+            st.caption('O absenteísmo usa a soma das ausências dividida pelo efetivo considerado. Vagas são somadas por passagem no período, não representam vagas únicas da empresa.')
+            st.markdown('#### Resultados por operação')
+            operacoes_torre=['CDA 01 - Separação','CDA 01 - Carregamento','CDA 02','Estoque']
+            cards_torre=st.columns(2)
+            for i,op_torre in enumerate(operacoes_torre):
+                parte=base_torre[base_torre['operacao']==op_torre]
+                with cards_torre[i%2]:
+                    with st.container(border=True):
+                        st.markdown('**'+op_torre+'**')
+                        st.caption(f'{len(parte)} passagem(ns) no período')
+                        if parte.empty:
+                            st.info('Sem passagem registrada')
+                        elif op_torre=='Estoque':
+                            st.metric('Paletes recebidos da produção',fmt_qtd(parte['recebimento_producao_paletes'].sum()))
+                            st.metric('Paletes abastecidos no picking',fmt_qtd(parte['abastecimento_picking_paletes'].sum()))
+                        elif op_torre=='CDA 01 - Carregamento':
+                            st.metric('Veículos carregados',fmt_qtd(parte['veiculos_carregados'].sum()))
+                            st.metric('Volume informado',fmt_t(parte['toneladas_realizadas'].apply(em_toneladas).sum()))
+                        else:
+                            st.metric('Cargas separadas',fmt_qtd(parte['cargas_realizadas'].sum()))
+                            if op_torre=='CDA 01 - Separação':
+                                st.metric('Volume informado',fmt_t(parte['toneladas_realizadas'].apply(em_toneladas).sum()))
+                            else:
+                                st.metric('Paletes / UZs',fmt_qtd(parte['uz_paletes'].sum()))
+            st.markdown('#### Absenteísmo por operação')
+            por_area=base_torre.groupby('operacao',as_index=False).agg(Efetivo=('Efetivo','sum'),Ausencias=('Ausencias_total','sum'),Passagens=('id','count'))
+            por_area['Absenteísmo (%)']=por_area.apply(lambda r:round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
+            st.dataframe(por_area.rename(columns={'operacao':'Operação','Ausencias':'Faltas + atestados'}),hide_index=True,use_container_width=True)
+            st.markdown('#### Comparativo de turnos')
+            por_turno_torre=base_torre.groupby(['operacao','turno'],as_index=False).agg(Passagens=('id','count'),Efetivo=('Efetivo','sum'),Ausencias=('Ausencias_total','sum'))
+            por_turno_torre['Turno']=por_turno_torre['turno'].apply(nome_turno)
+            por_turno_torre['Absenteísmo (%)']=por_turno_torre.apply(lambda r:round(100*r['Ausencias']/r['Efetivo'],2) if r['Efetivo'] else None,axis=1)
+            st.dataframe(por_turno_torre[['operacao','Turno','Passagens','Efetivo','Ausencias','Absenteísmo (%)']].rename(columns={'operacao':'Operação','Ausencias':'Faltas + atestados'}),hide_index=True,use_container_width=True)
+            st.markdown('#### Atenção operacional')
+            pendentes_torre=base_torre[base_torre['status'].astype(str).str.contains('Atenção|Crítico|Critico',case=False,na=False)]
+            if pendentes_torre.empty:
+                st.success('Nenhuma passagem sinalizada com status de atenção ou crítico no período.')
+            else:
+                st.warning(f'{len(pendentes_torre)} passagem(ns) com status de atenção ou crítico.')
+                avisos=pendentes_torre[['Data_ciclo','operacao','turno','status','ofensor']].copy()
+                avisos['Data_ciclo']=avisos['Data_ciclo'].astype(str)
+                avisos['turno']=avisos['turno'].apply(nome_turno)
+                st.dataframe(avisos.rename(columns={'Data_ciclo':'Data do ciclo','operacao':'Operação','turno':'Turno','status':'Status','ofensor':'Ofensor'}),hide_index=True,use_container_width=True)
+            st.caption('A ausência de um registro não significa produção zero. A Torre utiliza apenas passagens efetivamente registradas.')
 
 elif pagina=='👔 Visão do Supervisor':
     st.header('👔 Visão do Supervisor')
