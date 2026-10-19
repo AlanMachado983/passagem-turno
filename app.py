@@ -1147,6 +1147,47 @@ elif pagina=='👔 Visão do Supervisor':
         equipe_detalhe['Absenteísmo (%)']=equipe_detalhe.apply(lambda r: round(100*(r['ausencias']+r['atestados'])/r['Efetivo considerado'],1) if r['Efetivo considerado'] else 0,axis=1)
         equipe_detalhe['turno']=equipe_detalhe['turno'].apply(nome_turno)
         st.dataframe(equipe_detalhe.rename(columns={'data':'Data','turno':'Turno','responsavel':'Líder','headcount':'Headcount previsto','ferias':'Férias','afastamentos':'Afastamentos','folgas':'Folgas','atestados':'Atestados','ausencias':'Faltas'}),hide_index=True,use_container_width=True)
+        st.markdown('#### 📋 Quem faltou no turno')
+        st.caption('Nomes informados pelos líderes nas passagens selecionadas. Ranking somente de faltas não programadas; atestados, férias, afastamentos e folgas ficam fora.')
+        ids_passagens=[int(v) for v in dados['id'].dropna().tolist()]
+        if ids_passagens:
+            try:
+                marcadores=','.join(['?']*len(ids_passagens))
+                faltas_nomes=query(
+                    'SELECT co.passagem_id,co.categoria,co.nome,p.data,p.turno,p.operacao '
+                    'FROM colaboradores_ocorrencias co JOIN passagens p ON p.id=co.passagem_id '
+                    'WHERE p.excluido_em IS NULL AND co.passagem_id IN ('+marcadores+') '
+                    "AND co.categoria='Faltas' ORDER BY p.data DESC,p.id DESC",
+                    tuple(ids_passagens))
+                if faltas_nomes.empty:
+                    st.info('Nenhum nome de colaborador faltante foi registrado nas passagens deste período.')
+                else:
+                    faltas_nomes['Nome']=faltas_nomes['nome'].astype(str).str.strip().str.replace(r'\\s+',' ',regex=True).str.upper()
+                    faltas_nomes=faltas_nomes[faltas_nomes['Nome']!=''].drop_duplicates(subset=['passagem_id','Nome']).copy()
+                    faltas_nomes['Data operacional']=pd.to_datetime(faltas_nomes['data']).dt.strftime('%d/%m/%Y')
+                    faltas_nomes['Turno']=faltas_nomes['turno'].apply(nome_turno)
+                    if faltas_nomes.empty:
+                        st.info('Não há nomes preenchidos nas faltas do período.')
+                    else:
+                        ranking=(faltas_nomes.groupby('Nome',as_index=False)
+                                 .agg(Faltas=('passagem_id','count'),Turnos=('Turno',lambda x:', '.join(sorted(set(x)))))
+                                 .sort_values(['Faltas','Nome'],ascending=[False,True]).reset_index(drop=True))
+                        ranking.insert(0,'Posição',range(1,len(ranking)+1))
+                        r1,r2,r3=st.columns(3)
+                        r1.metric('Faltas com nome',len(faltas_nomes))
+                        r2.metric('Colaboradores identificados',len(ranking))
+                        r3.metric('Maior recorrência',int(ranking['Faltas'].max()))
+                        st.markdown('##### Ranking de faltas no período')
+                        st.dataframe(ranking,hide_index=True,use_container_width=True)
+                        st.markdown('##### Datas e turnos das faltas')
+                        st.dataframe(faltas_nomes[['Data operacional','Turno','Nome']].rename(columns={'Nome':'Colaborador'}),hide_index=True,use_container_width=True)
+                faltas_declaradas=int(pd.to_numeric(dados['ausencias'],errors='coerce').fillna(0).sum())
+                faltas_identificadas=len(faltas_nomes) if not faltas_nomes.empty else 0
+                if faltas_declaradas>faltas_identificadas:
+                    st.warning(f'Existem {faltas_declaradas-faltas_identificadas} falta(s) informada(s) sem nome identificado neste período. O ranking não inclui essas faltas.')
+                st.caption('O ranking conta uma falta por colaborador e passagem. Variações na grafia do nome podem aparecer como pessoas diferentes. Os dados são de uso interno.')
+            except Exception:
+                st.info('A consulta de nomes ainda não está disponível para estes registros. Os totais de absenteísmo permanecem preservados.')
         st.markdown('#### Detalhamento da operação')
         if op=='CDA 01 - Separação':
             a,b,c,d=st.columns(4)
