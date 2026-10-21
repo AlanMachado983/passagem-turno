@@ -1371,6 +1371,49 @@ elif pagina=='👔 Visão do Supervisor':
             conferencias['% UZs']=conferencias.apply(lambda r: round(pct(r['conf_uzs_conferidas'],r['conf_total_uzs']),1) if r['conf_total_uzs'] else None,axis=1)
             conferencias['Turno']=conferencias['turno'].apply(nome_turno)
             st.dataframe(conferencias[['Turno','conf_cargas_conferidas','conf_uzs_conferidas','% Cargas','% UZs','conf_erros']].rename(columns={'conf_cargas_conferidas':'Cargas conferidas','conf_uzs_conferidas':'UZs conferidas','conf_erros':'Erros'}),hide_index=True,use_container_width=True)
+            st.markdown('##### 📈 Evolução da conferência CDA 02')
+            periodo_conf=st.radio('Período da evolução',['Últimos 7 dias','Últimos 30 dias'],index=1,horizontal=True,key='sup_periodo_conf')
+            dias_conf=7 if periodo_conf=='Últimos 7 dias' else 30
+            fim_conf=agora_operacional().date()
+            inicio_conf=fim_conf-timedelta(days=dias_conf-1)
+            historico_conf=query(
+                "SELECT * FROM passagens WHERE excluido_em IS NULL AND operacao='CDA 02' AND data BETWEEN ? AND ? ORDER BY id",
+                (str(inicio_conf),str(fim_conf)))
+            if historico_conf.empty:
+                st.info('Sem registros de conferência no período escolhido.')
+            else:
+                historico_conf=historico_conf.sort_values('id').groupby(['data','turno','operacao'],as_index=False).tail(1).copy()
+                if turno_filtro!='Todos os turnos':
+                    historico_conf=historico_conf[historico_conf['turno']==turno_filtro].copy()
+                if historico_conf.empty:
+                    st.info('Nenhuma conferência registrada para este turno no período.')
+                else:
+                    for campo_conf in ['conf_total_cargas','conf_cargas_conferidas','conf_total_uzs','conf_uzs_conferidas','conf_erros']:
+                        historico_conf[campo_conf]=pd.to_numeric(historico_conf[campo_conf],errors='coerce').fillna(0)
+                    conf_cargas=historico_conf['conf_cargas_conferidas'].sum()
+                    conf_uzs=historico_conf['conf_uzs_conferidas'].sum()
+                    conf_erros=historico_conf['conf_erros'].sum()
+                    m1,m2,m3=st.columns(3)
+                    m1.metric('Cargas conferidas',fmt_qtd(conf_cargas))
+                    m2.metric('UZs conferidas',fmt_qtd(conf_uzs))
+                    m3.metric('Erros informados',fmt_qtd(conf_erros))
+                    evolucao_conf=(historico_conf.groupby('data',as_index=False)
+                        .agg(Cargas=('conf_cargas_conferidas','sum'),UZs=('conf_uzs_conferidas','sum'),Erros=('conf_erros','sum'))
+                        .sort_values('data'))
+                    evolucao_conf['Dia']=pd.to_datetime(evolucao_conf['data']).dt.strftime('%d/%m')
+                    st.markdown('**Cargas conferidas por dia**')
+                    st.line_chart(evolucao_conf.set_index('Dia')[['Cargas']],use_container_width=True)
+                    with st.expander('Ver UZs, divergências e comparativo por turno',expanded=False):
+                        st.line_chart(evolucao_conf.set_index('Dia')[['UZs']],use_container_width=True)
+                        st.bar_chart(evolucao_conf.set_index('Dia')[['Erros']],use_container_width=True)
+                        por_turno_conf=(historico_conf.groupby('turno',as_index=False)
+                            .agg(Cargas=('conf_cargas_conferidas','sum'),UZs=('conf_uzs_conferidas','sum'),
+                                 Erros=('conf_erros','sum'),Total_cargas=('conf_total_cargas','sum')))
+                        por_turno_conf['% conferido']=por_turno_conf.apply(
+                            lambda r:round(100*r['Cargas']/r['Total_cargas'],1) if r['Total_cargas'] else None,axis=1)
+                        por_turno_conf['Turno']=por_turno_conf['turno'].apply(nome_turno)
+                        st.dataframe(por_turno_conf[['Turno','Cargas','UZs','Erros','% conferido']],hide_index=True,use_container_width=True)
+                    st.caption('O gráfico utiliza a data registrada nas passagens e não considera dias sem lançamento como produção zero. Erros representam os registros informados pelos líderes.')
         elif op=='Estoque':
             a,b,c,d=st.columns(4)
             a.metric('Recebimento da produção',f"{dados['recebimento_producao_kg'].sum():,.0f} kg".replace(',','.'))
