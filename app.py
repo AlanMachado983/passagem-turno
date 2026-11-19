@@ -698,7 +698,7 @@ elif pagina=='📝 Nova Passagem':
     data_confirmada=True
     # Permissões operacionais por líder; a área e o turno permanecem automáticos.
     if area=='CDA 01':
-        if resp=='ALISON RIBEIRO DE OLIVEIRA':
+        if resp in ('ALISON RIBEIRO DE OLIVEIRA','ANDERSON DE MELO ALMEIDA'):
             operacao=st.selectbox('Operação autorizada',['CDA 01 - Separação','CDA 01 - Carregamento'])
         elif resp in ('BRUNO RICARDO DE OLIVEIRA MELO','WESLEY VITOR RODRIGUES'):
             operacao='CDA 01 - Carregamento'
